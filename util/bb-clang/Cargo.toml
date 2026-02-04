@@ -1,0 +1,11 @@
+[package]
+name = "bb-clang"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+bb-shared.workspace = true
+clang.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+colored.workspace = true

@@ -1,3 +1,5 @@
+//! Architecture definitions for cross-compilation support.
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum Arch {
     X86,

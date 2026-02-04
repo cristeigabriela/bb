@@ -3,13 +3,14 @@
 //! This module handles the visual representation of structs using Unicode
 //! box-drawing characters in a tree structure.
 
-use crate::matcher::glob_match;
+use bb_shared::glob_match;
 use colored::Colorize;
 use std::collections::HashSet;
 use std::fmt::Write;
 
-use super::traits::DeclarationKind;
-use super::{Field, SourceLocation};
+use crate::field::Field;
+use crate::struct_::SourceLocation;
+use crate::traits::DeclarationKind;
 
 /// Renders a struct in `WinDbg` `dt`-style format with Unicode box-drawing.
 ///

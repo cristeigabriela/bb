@@ -1,0 +1,11 @@
+[package]
+name = "bb-sdk"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+bb-clang.workspace = true
+clang.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+colored.workspace = true

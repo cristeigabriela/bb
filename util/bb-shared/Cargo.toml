@@ -1,0 +1,7 @@
+[package]
+name = "bb-shared"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+# No dependencies - pure Rust utilities

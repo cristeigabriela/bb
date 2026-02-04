@@ -1,4 +1,4 @@
-//! Errors module for bb.
+//! Error types for clang parsing.
 
 use thiserror::Error;
 

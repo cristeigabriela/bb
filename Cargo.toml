@@ -1,13 +1,27 @@
-[package]
-name = "bb"
+[workspace]
+members = [
+    "bb-types",
+    "util/bb-clang",
+    "util/bb-shared",
+    "util/bb-sdk",
+]
+resolver = "3"
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
 
-[dependencies]
+[workspace.dependencies]
+# Internal crates
+bb-clang = { path = "util/bb-clang" }
+bb-shared = { path = "util/bb-shared" }
+bb-sdk = { path = "util/bb-sdk" }
+
+# External dependencies (shared versions)
 clang = { version = "2.0.0", features = ["clang_10_0"] }
+clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 thiserror = "2"
-clap = { version = "4", features = ["derive"] }
-colored = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+colored = "2"

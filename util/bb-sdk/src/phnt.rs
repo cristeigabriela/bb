@@ -73,7 +73,7 @@ impl PhntVersion {
 }
 
 /// The embedded PHNT header file.
-pub const PHNT_HEADER: &str = include_str!("../../extra/phnt.h");
+pub const PHNT_HEADER: &str = include_str!("../extra/phnt.h");
 
 /// Generate a synthetic header that includes PHNT with the specified version.
 ///

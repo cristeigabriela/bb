@@ -136,10 +136,13 @@ pub fn check_wdk_installed(sdk: &SdkInfo) -> Result<()> {
     Ok(())
 }
 
-/// Obtain an unsaved string of a header file, that, depending
-/// on if you're running as [`SdkMode::User`] or [`SdkMode::Kernel`],
-/// will set up the include environment with user-mode or kernel-mode includes
-/// and definitions.
+/// Obtain a string of an unsaved header file which sets up the appropriate environment.
+///
+/// For [`SdkMode::User`], it will set up a build for user-mode, using user-mode headers
+/// and defines.
+///
+/// For [`SdkMode::Kernel`], it will set up a build for kernel, using kernel headers
+/// and defines.
 ///
 /// This will be later used by clang to parse the included contents.
 #[must_use]

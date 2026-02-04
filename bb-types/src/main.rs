@@ -1,16 +1,18 @@
 use anyhow::Result;
-use bb::arch::Arch;
-use bb::clang::Struct;
-use bb::phnt::PhntVersion;
-use bb::winsdk::SdkMode;
-use clang::{Clang, Entity, EntityKind, Index, TranslationUnit, Unsaved};
+use bb_clang::Struct;
+use bb_sdk::{
+    Arch, PhntVersion, SdkInfo, SdkMode, check_wdk_installed, get_sdk_info, iter_structs,
+    parse_phnt, parse_winsdk,
+};
+use bb_shared::glob_match;
+use clang::{Clang, Entity, Index};
 use clap::Parser;
-use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
 #[command(
+    before_help = "Benowin Blanc (bb): Windows through a detective's lens...",
     name = "bb",
-    about = "Parse Windows SDK or PHNT embedded headers and extract struct information"
+    about = "Parse Windows SDK or PHNT embedded headers and extract struct information."
 )]
 struct Args {
     // Header source selection (mutually exclusive via validation)
@@ -81,11 +83,11 @@ struct Args {
 /// Header source configuration.
 enum HeaderSource {
     WinSdk {
-        sdk: bb::winsdk::SdkInfo,
+        sdk: SdkInfo,
         mode: SdkMode,
     },
     Phnt {
-        sdk: bb::winsdk::SdkInfo, // Need SDK for base type includes
+        sdk: SdkInfo, // Need SDK for base type includes
         version: PhntVersion,
         mode: SdkMode,
     },
@@ -147,18 +149,18 @@ fn main() -> Result<()> {
 
 /// Compute a header source from the command-line arguments.
 ///
-/// - By default, WinSDK will be preferred, if nothing is explicitly specified instead.
-/// - By default, the WinSDK version that will be used is inferred from environment, if nothing
-/// is explicitly specified instead.
+/// - By default, `WinSDK` will be preferred, if nothing is explicitly specified instead.
+/// - By default, the `WinSDK` version that will be used is inferred from environment, if nothing
+///   is explicitly specified instead.
 /// - By default, the PHNT version that will be used is Win11, if nothing is explicitly specified
-/// instead.
+///   instead.
 fn get_header_source(args: &Args) -> anyhow::Result<HeaderSource> {
     match (&args.winsdk, &args.phnt) {
         (Some(_), Some(_)) => anyhow::bail!("Cannot use both --winsdk and --phnt"),
         (Some(version), None) => {
-            let sdk = bb::winsdk::get_sdk_info(version.as_deref())?;
+            let sdk = get_sdk_info(version.as_deref())?;
             if args.mode == SdkMode::Kernel {
-                bb::winsdk::check_wdk_installed(&sdk)?;
+                check_wdk_installed(&sdk)?;
             }
 
             Ok(HeaderSource::WinSdk {
@@ -168,7 +170,7 @@ fn get_header_source(args: &Args) -> anyhow::Result<HeaderSource> {
         }
         (None, Some(version)) => {
             // PHNT needs SDK include paths for base Windows types
-            let sdk = bb::winsdk::get_sdk_info(None)?;
+            let sdk = get_sdk_info(None)?;
             Ok(HeaderSource::Phnt {
                 sdk,
                 version: (*version).unwrap_or_default(),
@@ -177,9 +179,9 @@ fn get_header_source(args: &Args) -> anyhow::Result<HeaderSource> {
         }
         (None, None) => {
             // Default to Windows SDK from environment
-            let sdk = bb::winsdk::get_sdk_info(None)?;
+            let sdk = get_sdk_info(None)?;
             if args.mode == SdkMode::Kernel {
-                bb::winsdk::check_wdk_installed(&sdk)?;
+                check_wdk_installed(&sdk)?;
             }
             Ok(HeaderSource::WinSdk {
                 sdk,
@@ -189,7 +191,7 @@ fn get_header_source(args: &Args) -> anyhow::Result<HeaderSource> {
     }
 }
 
-fn build_sdk_clang_args(args: &Args, sdk: &bb::winsdk::SdkInfo) -> Vec<String> {
+fn build_sdk_clang_args(args: &Args, sdk: &SdkInfo) -> Vec<String> {
     let mut clang_args = vec!["-target".into(), args.arch.target_triple().into()];
 
     for subdir in ["shared", "um", "ucrt", "km"] {
@@ -202,7 +204,7 @@ fn build_sdk_clang_args(args: &Args, sdk: &bb::winsdk::SdkInfo) -> Vec<String> {
     clang_args
 }
 
-fn build_phnt_clang_args(args: &Args, sdk: &bb::winsdk::SdkInfo) -> Vec<String> {
+fn build_phnt_clang_args(args: &Args, sdk: &SdkInfo) -> Vec<String> {
     let mut clang_args = vec!["-target".into(), args.arch.target_triple().into()];
 
     // PHNT needs SDK include paths for base Windows types (ULONG, LIST_ENTRY, etc.)
@@ -215,56 +217,6 @@ fn build_phnt_clang_args(args: &Args, sdk: &bb::winsdk::SdkInfo) -> Vec<String> 
     clang_args.extend(args.arch.defines().iter().map(|&s| s.into()));
 
     clang_args
-}
-
-/// Build a synthetic header to parse for WinSDK using [`winsdk`] module.
-fn parse_winsdk<'a>(
-    index: &'a Index,
-    sdk: &bb::winsdk::SdkInfo,
-    args: &[String],
-    mode: SdkMode,
-) -> Result<TranslationUnit<'a>> {
-    let args_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    let synthetic_path = sdk.get_include_dir().join("__bb_synthetic.h");
-    let unsaved = Unsaved::new(&synthetic_path, bb::winsdk::sdk_header(mode));
-
-    let tu = index
-        .parser(synthetic_path.as_os_str())
-        .arguments(&args_refs)
-        .unsaved(&[unsaved])
-        .keep_going(true)
-        .parse()?;
-
-    Ok(tu)
-}
-
-/// Build a synthetic header to parse for PHNT using [`phnt`] module.
-fn parse_phnt<'a>(
-    index: &'a Index,
-    args: &[String],
-    version: PhntVersion,
-    mode: SdkMode,
-) -> Result<TranslationUnit<'a>> {
-    let args_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    let synthetic_path = PathBuf::from("__bb_phnt_synthetic.h");
-    let header_content = bb::phnt::phnt_synthetic_header(version, mode == SdkMode::Kernel);
-    let unsaved = Unsaved::new(&synthetic_path, &header_content);
-
-    let tu = index
-        .parser(synthetic_path.as_os_str())
-        .arguments(&args_refs)
-        .unsaved(&[unsaved])
-        .keep_going(true)
-        .parse()?;
-
-    Ok(tu)
-}
-
-fn iter_structs<'a>(tu: &'a TranslationUnit<'a>) -> impl Iterator<Item = Entity<'a>> {
-    tu.get_entity()
-        .get_children()
-        .into_iter()
-        .filter(|e| matches!(e.get_kind(), EntityKind::StructDecl | EntityKind::ClassDecl))
 }
 
 struct StructFilter {
@@ -288,9 +240,7 @@ impl StructFilter {
 
     fn matches_name(&self, entity: &Entity) -> bool {
         match (&self.name_pattern, entity.get_name()) {
-            (Some(pattern), Some(name)) => {
-                bb::matcher::glob_match(&name, pattern, self.case_sensitive)
-            }
+            (Some(pattern), Some(name)) => glob_match(&name, pattern, self.case_sensitive),
             (Some(_), None) => false,
             (None, _) => true,
         }
