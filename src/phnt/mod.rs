@@ -90,6 +90,7 @@ pub fn phnt_synthetic_header(version: PhntVersion, kernel_mode: bool) -> String 
     };
     format!(
         r#"{mode_define}{base_include}#define PHNT_VERSION {}
+#include <assert.h>
 #line 1 "phnt.h"
 {}
 "#,

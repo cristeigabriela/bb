@@ -74,12 +74,6 @@ struct Args {
     )]
     depth: usize,
 
-    #[arg(long = "cpp", help = "Parse as C++")]
-    cpp: bool,
-
-    #[arg(long = "std", default_value = "c++17", help = "C++ standard version")]
-    std: String,
-
     #[arg(long, help = "Show clang diagnostics")]
     diagnostics: bool,
 }
@@ -205,10 +199,6 @@ fn build_sdk_clang_args(args: &Args, sdk: &bb::winsdk::SdkInfo) -> Vec<String> {
 
     clang_args.extend(args.arch.defines().iter().map(|&s| s.into()));
 
-    if args.cpp {
-        clang_args.extend(["-x".into(), "c++".into(), format!("-std={}", args.std)]);
-    }
-
     clang_args
 }
 
@@ -223,10 +213,6 @@ fn build_phnt_clang_args(args: &Args, sdk: &bb::winsdk::SdkInfo) -> Vec<String> 
     }
 
     clang_args.extend(args.arch.defines().iter().map(|&s| s.into()));
-
-    if args.cpp {
-        clang_args.extend(["-x".into(), "c++".into(), format!("-std={}", args.std)]);
-    }
 
     clang_args
 }
