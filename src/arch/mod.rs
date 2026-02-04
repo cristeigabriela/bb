@@ -7,7 +7,8 @@ pub enum Arch {
 }
 
 impl Arch {
-    #[must_use] pub const fn target_triple(self) -> &'static str {
+    #[must_use]
+    pub const fn target_triple(self) -> &'static str {
         match self {
             Self::X86 => "i686-pc-windows-msvc",
             Self::Amd64 => "x86_64-pc-windows-msvc",
@@ -16,7 +17,8 @@ impl Arch {
         }
     }
 
-    #[must_use] pub const fn defines(self) -> &'static [&'static str] {
+    #[must_use]
+    pub const fn defines(self) -> &'static [&'static str] {
         match self {
             Self::X86 => &["-D_WIN32", "-D_X86_", "-D_M_IX86=600"],
             Self::Amd64 => &[

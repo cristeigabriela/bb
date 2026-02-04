@@ -1,3 +1,5 @@
+//! Errors module for bb.
+
 use thiserror::Error;
 
 #[derive(Debug, Error)]
