@@ -61,10 +61,10 @@ impl UnderlyingType for Type<'_> {
     /// so that `PLIST_ENTRY` (pointer to `LIST_ENTRY`) expands `LIST_ENTRY`'s fields.
     fn get_underlying_type(&self) -> Self {
         let canonical_type = self.get_canonical_type();
-        if let Some(underlying_type) = canonical_type.get_pointee_type() {
-            underlying_type.get_canonical_type()
-        } else if let Some(underlying_type) = canonical_type.get_element_type() {
-            underlying_type.get_canonical_type()
+        if let Some(pointee_type) = canonical_type.get_pointee_type() {
+            pointee_type.get_canonical_type()
+        } else if let Some(element_type) = canonical_type.get_element_type() {
+            element_type.get_canonical_type()
         } else {
             canonical_type
         }

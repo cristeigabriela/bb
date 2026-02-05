@@ -16,12 +16,12 @@ use crate::traits::DeclarationKind;
 ///
 /// # Arguments
 ///
-/// * `name` - The struct name
-/// * `location` - Optional source location (file, line, column)
-/// * `size` - Optional total size in bytes
-/// * `fields` - The struct's fields
-/// * `depth` - Maximum recursion depth for expanding nested types (0 = no expansion)
-/// * `field_filter` - Optional glob pattern to filter which fields are displayed
+/// * `name` - The struct name.
+/// * `location` - Optional source location (file, line, column).
+/// * `size` - Optional total size in bytes.
+/// * `fields` - The struct's fields.
+/// * `depth` - Maximum recursion depth for expanding nested types (0 = no expansion).
+/// * `field_filter` - Optional glob pattern to filter which fields are displayed.
 ///
 /// # Cycle Detection
 ///
@@ -63,13 +63,13 @@ pub fn render_struct(
 ///
 /// # Arguments
 ///
-/// * `out` - Output string buffer
-/// * `fields` - Fields to render
-/// * `max_depth` - Maximum recursion depth for nested types
-/// * `current_depth` - Current depth in the recursion
-/// * `prefix` - Indentation prefix for the current level (contains box chars like "│  ")
-/// * `field_filter` - Optional glob pattern to filter fields (only applied at root level)
-/// * `seen` - Set of type names currently in the ancestor chain (for cycle detection)
+/// * `out` - Output string buffer.
+/// * `fields` - Fields to render.
+/// * `max_depth` - Maximum recursion depth for nested types.
+/// * `current_depth` - Current depth in the recursion.
+/// * `prefix` - Indentation prefix for the current level.
+/// * `field_filter` - Optional glob pattern to filter fields (only applied at root level).
+/// * `seen` - Set of type names currently in the ancestor chain (for cycle detection).
 ///
 /// # Cycle Detection Strategy
 ///
