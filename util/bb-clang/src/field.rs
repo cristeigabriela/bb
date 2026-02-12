@@ -1,10 +1,13 @@
 //! Field type representation.
 
-use crate::error::ParseError;
+use crate::error::FieldError;
+use crate::location::SourceLocation;
 use crate::struct_::Struct;
-use crate::traits::{AnonymousType, UnderlyingType};
+use crate::traits::{AnonymousType, HasChildrenType, UnderlyingType};
 use clang::{Entity, EntityKind, Type};
 use serde::Serialize;
+
+/* ────────────────────────────────── Types ───────────────────────────────── */
 
 #[derive(Debug, Serialize)]
 pub struct Field<'a> {
@@ -18,6 +21,8 @@ pub struct Field<'a> {
     type_: Type<'a>,
     #[serde(rename = "type")]
     type_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    location: Option<SourceLocation>,
     offset: usize,
     #[serde(rename = "offset_bytes")]
     offset_bytes: usize,
@@ -44,12 +49,16 @@ impl<'a> Field<'a> {
         &self.type_
     }
     #[must_use]
-    pub const fn get_type_name(&self) -> &Option<String> {
-        &self.type_name
+    pub fn get_type_name(&self) -> Option<&str> {
+        self.type_name.as_deref()
     }
     #[must_use]
     pub fn get_canonical_type(&self) -> Type<'a> {
         self.type_.get_canonical_type()
+    }
+    #[must_use]
+    pub const fn get_location(&self) -> Option<&SourceLocation> {
+        self.location.as_ref()
     }
     #[must_use]
     pub const fn get_offset(&self) -> usize {
@@ -57,7 +66,7 @@ impl<'a> Field<'a> {
     }
     #[must_use]
     pub const fn get_offset_bytes(&self) -> usize {
-        self.offset / 8
+        self.offset_bytes
     }
     #[must_use]
     pub const fn get_size(&self) -> usize {
@@ -80,15 +89,13 @@ impl<'a> Field<'a> {
     /// Returns true if this field's underlying type has child fields that can be expanded.
     #[must_use]
     pub fn has_children(&self) -> bool {
-        Some(self.get_underlying_type())
-            .and_then(|t| t.get_fields())
-            .is_some_and(|fields| !fields.is_empty())
+        self.get_underlying_type().has_children()
     }
 
     #[must_use]
     pub fn get_child_fields(&self) -> Vec<Self> {
-        Some(self.get_underlying_type())
-            .and_then(|t| t.get_declaration())
+        self.get_underlying_type()
+            .get_declaration()
             .map(|decl| collect_fields(&decl))
             .unwrap_or_default()
     }
@@ -101,41 +108,7 @@ impl<'a> Field<'a> {
     }
 }
 
-/// Generate [`Field`] from child-parent reference tuple, where the child is a field declaration.
-impl<'a> TryFrom<(Entity<'a>, &Entity<'a>)> for Field<'a> {
-    type Error = ParseError;
-
-    fn try_from((entity, parent): (Entity<'a>, &Entity<'a>)) -> Result<Self, Self::Error> {
-        if entity.get_kind() != EntityKind::FieldDecl {
-            return Err(ParseError::NotFieldDecl);
-        }
-
-        let type_ = entity.get_type().ok_or(ParseError::NoType)?;
-        let name = entity.get_name().ok_or(ParseError::NoName)?;
-        let semantic_parent = entity.get_semantic_parent().ok_or(ParseError::NoType)?;
-        let anonymous_type = type_.is_anonymous().unwrap_or(false);
-        let type_name = (!anonymous_type).then(|| type_.get_display_name());
-
-        let parent_type = parent.get_type().ok_or(ParseError::NoType)?;
-        let offset = parent_type
-            .get_offsetof(&name)
-            .map_err(|_| ParseError::NoOffset)?;
-        let size = type_.get_sizeof().map_err(|_| ParseError::NoSize)?;
-        let alignment = type_.get_alignof().map_err(|_| ParseError::NoAlignment)?;
-
-        Ok(Self {
-            entity,
-            semantic_parent,
-            name,
-            type_,
-            type_name,
-            offset,
-            offset_bytes: offset / 8,
-            size,
-            alignment,
-        })
-    }
-}
+/* ──────────────────────────────── Utilities ─────────────────────────────── */
 
 /// Collects all field declarations from a struct/class entity.
 pub fn collect_fields<'a>(entity: &Entity<'a>) -> Vec<Field<'a>> {
@@ -151,4 +124,45 @@ pub fn collect_fields<'a>(entity: &Entity<'a>) -> Vec<Field<'a>> {
         EntityVisitResult::Continue
     });
     fields
+}
+
+/* ─────────────────────────────── Conversions ────────────────────────────── */
+
+/// Generate [`Field`] from child-parent reference tuple, where the child is a [`EntityKind::FieldDecl`].
+impl<'a> TryFrom<(Entity<'a>, &Entity<'a>)> for Field<'a> {
+    type Error = FieldError;
+
+    fn try_from((entity, parent): (Entity<'a>, &Entity<'a>)) -> Result<Self, Self::Error> {
+        let kind = entity.get_kind();
+        if kind != EntityKind::FieldDecl {
+            return Err(FieldError::NotField(kind));
+        }
+
+        let type_ = entity.get_type().ok_or(FieldError::NoType)?;
+        let name = entity.get_name().ok_or(FieldError::NoName)?;
+        let semantic_parent = entity.get_semantic_parent().ok_or(FieldError::NoType)?;
+        let anonymous_type = type_.is_anonymous().unwrap_or(false);
+        let type_name = (!anonymous_type).then(|| type_.get_display_name());
+
+        let parent_type = parent.get_type().ok_or(FieldError::NoType)?;
+        let offset = parent_type
+            .get_offsetof(&name)
+            .map_err(|_| FieldError::NoOffset(name.clone()))?;
+        let location = SourceLocation::from_entity(&entity);
+        let size = type_.get_sizeof().map_err(|_| FieldError::NoSize)?;
+        let alignment = type_.get_alignof().map_err(|_| FieldError::NoAlignment)?;
+
+        Ok(Self {
+            entity,
+            semantic_parent,
+            name,
+            type_,
+            type_name,
+            location,
+            offset,
+            offset_bytes: offset / 8,
+            size,
+            alignment,
+        })
+    }
 }

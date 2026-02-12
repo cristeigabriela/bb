@@ -2,6 +2,8 @@
 //!
 //! This crate provides common utilities used across the bb workspace.
 
+/* ──────────────────────────────── Utilities ─────────────────────────────── */
+
 /// Match over string using Windows, `PowerShell` `-Like` syntax.
 ///
 /// # Arguments

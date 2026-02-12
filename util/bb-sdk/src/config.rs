@@ -9,6 +9,8 @@ use crate::winsdk::{SdkInfo, SdkMode, check_wdk_installed, get_sdk_info};
 use anyhow::Result;
 use clang::{Index, TranslationUnit};
 
+/* ────────────────────────────────── Types ───────────────────────────────── */
+
 /// Configuration for parsing Windows headers.
 ///
 /// This enum encapsulates all the necessary configuration for parsing either
@@ -106,6 +108,10 @@ impl HeaderConfig {
     /// Create a PHNT configuration with the default version (Win11).
     ///
     /// This is a convenience method equivalent to `phnt(arch, PhntVersion::default(), mode)`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if Windows SDK is not found (needed for base types).
     pub fn phnt_default(arch: Arch, mode: SdkMode) -> Result<Self> {
         Self::phnt(arch, PhntVersion::default(), mode)
     }
@@ -163,16 +169,27 @@ impl HeaderConfig {
 
     /// Parse headers with this configuration.
     ///
-    /// # Arguments
+    /// When `detailed_preprocessing` is true, the translation unit records preprocessor
+    /// macro definitions.
     ///
-    /// * `index` - A Clang index to use for parsing.
+    /// This is needed for constant/macro extraction but not for struct-only parsing.
     ///
-    /// Returns a `TranslationUnit` containing the parsed AST.
-    pub fn parse<'a>(&self, index: &'a Index) -> Result<TranslationUnit<'a>> {
+    /// # Errors
+    ///
+    /// Will return an `Err` in scenarios where any of the SDK prerequisites are missing.
+    pub fn parse<'a>(
+        &self,
+        index: &'a Index,
+        detailed_preprocessing: bool,
+    ) -> Result<TranslationUnit<'a>> {
         let args = self.clang_args();
         match self {
-            Self::WinSdk { sdk, mode, .. } => parse_winsdk(index, sdk, &args, *mode),
-            Self::Phnt { version, mode, .. } => parse_phnt(index, &args, *version, *mode),
+            Self::WinSdk { sdk, mode, .. } => {
+                parse_winsdk(index, sdk, &args, *mode, detailed_preprocessing)
+            }
+            Self::Phnt { version, mode, .. } => {
+                parse_phnt(index, &args, *version, *mode, detailed_preprocessing)
+            }
         }
     }
 }

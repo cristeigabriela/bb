@@ -1,31 +1,15 @@
 //! Struct type representation.
 
 use crate::display;
-use crate::error::ParseError;
+use crate::error::StructError;
 use crate::field::{Field, collect_fields};
+use crate::location::SourceLocation;
 use crate::traits::{AnonymousType, DeclarationKind};
 use clang::{Entity, EntityKind};
 use serde::Serialize;
 use std::collections::HashSet;
 
-/// Source location information (file, line, column).
-#[derive(Debug, Clone, Serialize)]
-pub struct SourceLocation {
-    pub file: Option<String>,
-    pub line: u32,
-    pub column: u32,
-}
-
-impl SourceLocation {
-    /// Format as "<file:line:col>" or "line:col" if no file.
-    #[must_use]
-    pub fn display_short(&self) -> String {
-        match &self.file {
-            Some(f) => format!("{}:{}:{}", f, self.line, self.column),
-            None => format!("{}:{}", self.line, self.column),
-        }
-    }
-}
+/* ────────────────────────────────── Types ───────────────────────────────── */
 
 #[derive(Debug, Serialize)]
 pub struct Struct<'a> {
@@ -67,18 +51,9 @@ impl<'a> Struct<'a> {
     }
 
     /// Renders this struct in a `WinDbg` `dt`-style format with Unicode box-drawing.
-    ///
-    /// See [`display::render_struct`] for full documentation on cycle detection strategy.
     #[must_use]
     pub fn display(&self, depth: usize, field_filter: Option<&str>) -> String {
-        display::render_struct(
-            &self.name,
-            self.location.as_ref(),
-            self.size,
-            &self.fields,
-            depth,
-            field_filter,
-        )
+        display::render_struct(self, depth, field_filter)
     }
 
     /// Extracts all nested struct types up to the specified depth for JSON serialization.
@@ -136,28 +111,19 @@ impl<'a> Struct<'a> {
     }
 }
 
-/// Generate [`Struct`] from entity that is either a class or struct declaration.
+/* ─────────────────────────────── Conversions ────────────────────────────── */
+
+/// Generate [`Struct`] from entity that is either a [`EntityKind::ClassDecl`] or [`EntityKind::StructDecl`].
 impl<'a> TryFrom<Entity<'a>> for Struct<'a> {
-    type Error = ParseError;
+    type Error = StructError;
 
     fn try_from(entity: Entity<'a>) -> Result<Self, Self::Error> {
         let kind = entity.get_kind();
         if !matches!(kind, EntityKind::ClassDecl | EntityKind::StructDecl) {
-            return Err(ParseError::NotStructOrClass);
+            return Err(StructError::NotStructOrClass(kind));
         }
 
-        // Extract location info
-        let location = entity.get_location().map(|loc| {
-            let file_loc = loc.get_file_location();
-            SourceLocation {
-                file: file_loc
-                    .file
-                    .map(|f| f.get_path())
-                    .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned())),
-                line: file_loc.line,
-                column: file_loc.column,
-            }
-        });
+        let location = SourceLocation::from_entity(&entity);
 
         // Handle anonymous structures
         let is_anonymous = entity
@@ -169,10 +135,10 @@ impl<'a> TryFrom<Entity<'a>> for Struct<'a> {
             let kind_str = entity
                 .get_type()
                 .and_then(|t| t.get_declaration_kind_name())
-                .unwrap_or_else(|| "type".into());
+                .unwrap_or("type");
             format!("<anonymous {kind_str}>")
         } else {
-            entity.get_name().ok_or(ParseError::NoName)?
+            entity.get_name().ok_or(StructError::NoName)?
         };
 
         let fields = collect_fields(&entity);

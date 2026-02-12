@@ -1,9 +1,11 @@
 use anyhow::Result;
 use bb_clang::Struct;
-use bb_sdk::{Arch, HeaderConfig, PhntVersion, SdkMode, iter_structs};
+use bb_sdk::{Arch, HeaderConfig, PhntVersion, SdkMode};
 use bb_shared::glob_match;
-use clang::{Clang, Entity, Index};
+use clang::{Clang, Entity, EntityKind, Index, TranslationUnit};
 use clap::Parser;
+
+/* ─────────────────────────────────── CLI ────────────────────────────────── */
 
 #[derive(Parser, Debug)]
 #[command(
@@ -88,7 +90,7 @@ fn main() -> Result<()> {
     let index = Index::new(&clang_instance, false, args.diagnostics);
 
     // Parse headers.
-    let tu = config.parse(&index)?;
+    let tu = config.parse(&index, false)?;
 
     let filter = StructFilter::new(&args);
     let structs: Vec<_> = iter_structs(&tu)
@@ -116,6 +118,8 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+/* ─────────────────────────────────── SDK ────────────────────────────────── */
+
 /// Build a [`HeaderConfig`] from the command-line arguments.
 ///
 /// - By default, `WinSDK` will be preferred if nothing is explicitly specified.
@@ -142,6 +146,18 @@ fn get_header_config(args: &Args) -> Result<HeaderConfig> {
         }
     }
 }
+
+/* ────────────────────────────────── Iter ────────────────────────────────── */
+
+/// Iterate over struct declarations in a [`TranslationUnit`].
+pub fn iter_structs<'a>(tu: &'a TranslationUnit<'a>) -> impl Iterator<Item = Entity<'a>> {
+    tu.get_entity()
+        .get_children()
+        .into_iter()
+        .filter(|e| matches!(e.get_kind(), EntityKind::StructDecl | EntityKind::ClassDecl))
+}
+
+/* ────────────────────────────────── Match ───────────────────────────────── */
 
 struct StructFilter {
     name_pattern: Option<String>,

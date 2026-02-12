@@ -3,23 +3,35 @@
 use crate::phnt::{PhntVersion, phnt_synthetic_header};
 use crate::winsdk::{SdkInfo, SdkMode, sdk_header};
 use anyhow::Result;
-use clang::{Entity, EntityKind, Index, TranslationUnit, Unsaved};
+use clang::{Index, TranslationUnit, Unsaved};
 use std::path::PathBuf;
 
-/// Build a [`Unsaved`] header to parse for `WinSDK` using [`crate::winsdk`] module.
+/* ──────────────────────────────── Utilities ─────────────────────────────── */
+
+/// Parse Windows SDK headers into a [`TranslationUnit`].
+///
+/// When `detailed_preprocessing` is true, the translation unit records
+/// macro definitions (needed by bb-consts for `#define` extraction).
+///
+/// # Errors
+///
+/// Will return an `Err` if parsing fails.
 pub fn parse_winsdk<'a>(
     index: &'a Index,
     sdk: &SdkInfo,
     args: &[String],
     mode: SdkMode,
+    detailed_preprocessing: bool,
 ) -> Result<TranslationUnit<'a>> {
     let args_refs: Vec<&str> = args.iter().map(String::as_str).collect();
     let synthetic_path = sdk.get_include_dir().join("__bb_synthetic.h");
-    let unsaved = Unsaved::new(&synthetic_path, sdk_header(mode));
+    let header_content = sdk_header(mode);
+    let unsaved = Unsaved::new(&synthetic_path, &header_content);
 
     let tu = index
         .parser(synthetic_path.as_os_str())
         .arguments(&args_refs)
+        .detailed_preprocessing_record(detailed_preprocessing)
         .unsaved(&[unsaved])
         .keep_going(true)
         .parse()?;
@@ -27,12 +39,20 @@ pub fn parse_winsdk<'a>(
     Ok(tu)
 }
 
-/// Build a [`Unsaved`] header to parse for PHNT using [`crate::phnt`] module.
+/// Parse PHNT headers into a [`TranslationUnit`].
+///
+/// When `detailed_preprocessing` is true, the translation unit records
+/// macro definitions (needed by bb-consts for `#define` extraction).
+///
+/// # Errors
+///
+/// Will return an `Err` if parsing fails.
 pub fn parse_phnt<'a>(
     index: &'a Index,
     args: &[String],
     version: PhntVersion,
     mode: SdkMode,
+    detailed_preprocessing: bool,
 ) -> Result<TranslationUnit<'a>> {
     let args_refs: Vec<&str> = args.iter().map(String::as_str).collect();
     let synthetic_path = PathBuf::from("__bb_phnt_synthetic.h");
@@ -42,17 +62,10 @@ pub fn parse_phnt<'a>(
     let tu = index
         .parser(synthetic_path.as_os_str())
         .arguments(&args_refs)
+        .detailed_preprocessing_record(detailed_preprocessing)
         .unsaved(&[unsaved])
         .keep_going(true)
         .parse()?;
 
     Ok(tu)
-}
-
-/// Iterate over struct declarations in a [`TranslationUnit`].
-pub fn iter_structs<'a>(tu: &'a TranslationUnit<'a>) -> impl Iterator<Item = Entity<'a>> {
-    tu.get_entity()
-        .get_children()
-        .into_iter()
-        .filter(|e| matches!(e.get_kind(), EntityKind::StructDecl | EntityKind::ClassDecl))
 }
