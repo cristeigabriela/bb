@@ -1,0 +1,19 @@
+[package]
+name = "bb-consts"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "bb-consts"
+path = "src/main.rs"
+
+[dependencies]
+bb-sdk.workspace = true
+bb-clang.workspace = true
+bb-shared.workspace = true
+clang.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+serde_json.workspace = true
+colored.workspace = true
+serde.workspace = true
