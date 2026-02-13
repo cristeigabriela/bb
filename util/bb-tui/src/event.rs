@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 
 use crate::{App, Focus, TuiData};
 
@@ -39,11 +39,51 @@ pub fn run<D: TuiData>(app: &mut App<D>) -> Result<()> {
                     app.focus = Focus::Content;
                 }
                 KeyCode::Backspace => {
-                    app.search.pop();
-                    app.rebuild();
+                    if app.cursor > 0 {
+                        // Find the previous char boundary.
+                        let prev = app.search[..app.cursor]
+                            .char_indices()
+                            .next_back()
+                            .map_or(0, |(i, _)| i);
+                        app.search.remove(prev);
+                        app.cursor = prev;
+                        app.rebuild();
+                    }
+                }
+                KeyCode::Delete => {
+                    if app.cursor < app.search.len() {
+                        app.search.remove(app.cursor);
+                        app.rebuild();
+                    }
+                }
+                KeyCode::Left if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    app.cursor = word_boundary_left(&app.search, app.cursor);
+                }
+                KeyCode::Right if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    app.cursor = word_boundary_right(&app.search, app.cursor);
+                }
+                KeyCode::Left => {
+                    if app.cursor > 0 {
+                        app.cursor = app.search[..app.cursor]
+                            .char_indices()
+                            .next_back()
+                            .map_or(0, |(i, _)| i);
+                    }
+                }
+                KeyCode::Right => {
+                    if app.cursor < app.search.len() {
+                        app.cursor += app.search[app.cursor..].chars().next().map_or(0, char::len_utf8);
+                    }
+                }
+                KeyCode::Home => {
+                    app.cursor = 0;
+                }
+                KeyCode::End => {
+                    app.cursor = app.search.len();
                 }
                 KeyCode::Char(c) => {
-                    app.search.push(c);
+                    app.search.insert(app.cursor, c);
+                    app.cursor += c.len_utf8();
                     app.rebuild();
                 }
                 _ => {}
@@ -52,6 +92,7 @@ pub fn run<D: TuiData>(app: &mut App<D>) -> Result<()> {
             Focus::Tree => match key.code {
                 KeyCode::Char('q') => break Ok(()),
                 KeyCode::Char('/') => {
+                    app.cursor = app.search.len();
                     app.focus = Focus::Search;
                 }
                 KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => {
@@ -75,11 +116,14 @@ pub fn run<D: TuiData>(app: &mut App<D>) -> Result<()> {
             Focus::Content => match key.code {
                 KeyCode::Char('q') => break Ok(()),
                 KeyCode::Char('/') => {
+                    app.cursor = app.search.len();
                     app.focus = Focus::Search;
                 }
                 KeyCode::Tab => {
                     app.focus = Focus::Tree;
                 }
+                KeyCode::Char('J') => app.scroll_down(10),
+                KeyCode::Char('K') => app.scroll_up(10),
                 KeyCode::Down | KeyCode::Char('j') => app.scroll_down(1),
                 KeyCode::Up | KeyCode::Char('k') => app.scroll_up(1),
                 KeyCode::Left | KeyCode::Char('h') => app.scroll_left(4),
@@ -97,4 +141,62 @@ pub fn run<D: TuiData>(app: &mut App<D>) -> Result<()> {
 
     ratatui::restore();
     result
+}
+
+/* ───────────────────────────────── Helpers ──────────────────────────────── */
+
+/// Move cursor left to the start of the previous word.
+///
+/// Skips trailing non-alphanumeric chars, then skips the word itself.
+fn word_boundary_left(s: &str, cursor: usize) -> usize {
+    let left = &s[..cursor];
+    let mut chars = left.char_indices().rev();
+
+    // Skip non-word characters (separators like `_`, spaces, punctuation).
+    let mut pos = cursor;
+    for (i, c) in chars.by_ref() {
+        if c.is_alphanumeric() {
+            pos = i;
+            break;
+        }
+        pos = i;
+    }
+
+    // Skip word characters.
+    for (i, c) in chars {
+        if !c.is_alphanumeric() {
+            return i + c.len_utf8();
+        }
+        pos = i;
+    }
+
+    pos
+}
+
+/// Move cursor right to the end of the next word.
+///
+/// Skips leading non-alphanumeric chars, then skips the word itself.
+fn word_boundary_right(s: &str, cursor: usize) -> usize {
+    let right = &s[cursor..];
+    let mut chars = right.char_indices();
+
+    // Skip non-word characters.
+    let mut pos = cursor;
+    for (i, c) in chars.by_ref() {
+        if c.is_alphanumeric() {
+            pos = cursor + i;
+            break;
+        }
+        pos = cursor + i + c.len_utf8();
+    }
+
+    // Skip word characters.
+    for (i, c) in chars {
+        if !c.is_alphanumeric() {
+            return cursor + i;
+        }
+        pos = cursor + i + c.len_utf8();
+    }
+
+    pos
 }

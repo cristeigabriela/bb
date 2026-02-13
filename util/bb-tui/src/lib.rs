@@ -60,6 +60,8 @@ pub trait TuiData {
 pub struct App<D> {
     pub focus: Focus,
     pub search: String,
+    /// Byte offset of the cursor within `search`.
+    pub cursor: usize,
     pub scroll: usize,
     pub hscroll: usize,
     pub file_cursor: usize,
@@ -68,9 +70,12 @@ pub struct App<D> {
 
 impl<D: TuiData> App<D> {
     pub fn new(data: D, initial_search: &str) -> Self {
+        let search = initial_search.to_string();
+        let cursor = search.len();
         let mut app = Self {
             focus: Focus::Tree,
-            search: initial_search.to_string(),
+            search,
+            cursor,
             scroll: 0,
             hscroll: 0,
             file_cursor: 0,
