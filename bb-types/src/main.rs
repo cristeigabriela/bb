@@ -1,7 +1,7 @@
 use anyhow::Result;
 use bb_clang::Struct;
-use bb_cli::get_header_config;
-use bb_types_lib::{StructFilter, collect_structs};
+use bb_cli::{get_header_config, print_suggestions};
+use bb_types_lib::{StructFilter, collect_structs, iter_structs};
 use clang::{Clang, Index};
 use clap::Parser;
 
@@ -72,6 +72,16 @@ fn main() -> Result<()> {
         case_sensitive: args.case_sensitive,
     };
     let structs = collect_structs(&tu, &filter);
+
+    // If no struct that matches our filter was found, try to print a suggestion.
+    if structs.is_empty() {
+        let names: Vec<String> = iter_structs(&tu).filter_map(|e| e.get_name()).collect();
+        print_suggestions(
+            "structs",
+            args.struct_name.as_deref(),
+            names.iter().map(String::as_str),
+        );
+    }
 
     if args.json {
         print_json(structs.as_slice(), args.depth)?;

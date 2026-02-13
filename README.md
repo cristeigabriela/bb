@@ -143,6 +143,19 @@ bb-types --arch arm64 --struct _CONTEXT
 bb-types --arch arm64 --struct _CONTEXT --json
 ```
 
+**Typo? Both CLIs suggest close matches:**
+
+```bash
+bb-types --struct _PBE
+error: no structs matching '_PBE'
+
+  did you mean?
+
+    _ABC
+    _PSP
+    _PEB
+```
+
 ---
 
 ## The tools
@@ -207,8 +220,8 @@ Uses whatever version is available in your Developer Command Prompt environment.
 Covers **user-mode** headers (`windows.h`, `winternl.h`, `dbghelp.h`, crypto, networking, shell, COM, etc.) and **kernel-mode** headers (`ntddk.h`, `wdm.h`, `ntifs.h`, `fltkernel.h`, etc.)
 
 ```
-bb-types --winsdk --struct DRIVER_OBJECT
-bb-types --mode kernel --struct EPROCESS
+bb-types --mode kernel --winsdk --struct *DRIVER_OBJECT*
+bb-types --mode kernel --struct *EPROCESS*
 ```
 
 </td>
@@ -221,7 +234,7 @@ The **Process Hacker NT headers**, embedded at compile time. Exposes internal NT
 Supports version targeting from **Win2000** through **Win11 22H2**:
 
 ```
-bb-types --phnt win11 --struct PEB
+bb-types --phnt win11 --struct _PEB
 bb-consts --phnt --name "STATUS_*"
 ```
 

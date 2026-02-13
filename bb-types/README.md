@@ -21,6 +21,23 @@
 
 ---
 
+### Fuzzy suggestions
+
+When an exact (non-wildcard) name doesn't match anything, `bb-types` suggests close matches — catching both typos and incomplete names:
+
+```bash
+bb-types --struct _PBE
+error: no structs matching '_PBE'
+
+  did you mean?
+
+    _ABC
+    _PSP
+    _PEB
+```
+
+---
+
 ### Shared with `bb-consts`
 
 <details>

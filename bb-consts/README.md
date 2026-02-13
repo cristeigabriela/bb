@@ -20,6 +20,27 @@
 
 ---
 
+### Fuzzy suggestions
+
+When an exact (non-wildcard) name doesn't match anything, `bb-consts` suggests close matches — catching both typos and incomplete names:
+
+```bash
+bb-consts --name INVALID_
+error: no constants matching 'INVALID_'
+
+  did you mean?
+
+    INVALID_ATOM
+    INVALID_SOCKET
+    INVALID_FILE_SIZE
+    INVALID_LINK_INDEX
+    INVALID_HANDLE_VALUE
+```
+
+This also works for `--enum` patterns.
+
+---
+
 ### Shared with `bb-types`
 
 <details>

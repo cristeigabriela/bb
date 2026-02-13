@@ -1,9 +1,9 @@
 use anyhow::Result;
 use bb_clang::{ConstLookup, Constant, Enum, render_constants};
-use bb_cli::get_header_config;
+use bb_cli::{get_header_config, print_suggestions};
 use bb_consts_lib::{
     ConstFilter, build_lookup_table, collect_constants, collect_enums, filter_constants_by_name,
-    parse_name_pattern, resolve_macros,
+    iter_enums, parse_name_pattern, resolve_macros,
 };
 use bb_shared::glob_match;
 use clang::{Clang, Index};
@@ -89,6 +89,35 @@ fn main() -> Result<()> {
 
     // Apply name filter AFTER resolution.
     let vars = filter_constants_by_name(vars, &filter);
+
+    // Suggest close constant names when nothing matched the const pattern.
+    // Check both standalone vars AND enum children — if neither has a hit,
+    // the user likely typo'd.
+    if let Some(pat) = filter.const_pattern.as_deref() {
+        let has_enum_hit = enums.iter().any(|e| {
+            e.get_constants()
+                .iter()
+                .any(|c| glob_match(c.get_name(), pat, filter.case_sensitive))
+        });
+        if vars.is_empty() && !has_enum_hit {
+            print_suggestions(
+                "constants",
+                Some(pat),
+                known.keys().map(String::as_str),
+            );
+        }
+    }
+
+    // Suggest close enum names when nothing matched the enum pattern.
+    if enums.is_empty() && filter.enum_pattern.is_some() {
+        let enum_names: Vec<String> =
+            iter_enums(&tu).filter_map(|e| e.get_name()).collect();
+        print_suggestions(
+            "enums",
+            filter.enum_pattern.as_deref(),
+            enum_names.iter().map(String::as_str),
+        );
+    }
 
     if args.json {
         print_json(&enums, &vars, &filter)?;

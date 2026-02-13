@@ -2,7 +2,7 @@
 //!
 //! This crate provides common utilities used across the bb workspace.
 
-/* ──────────────────────────────── Utilities ─────────────────────────────── */
+/* ─────────────────────────────── Glob match ─────────────────────────────── */
 
 /// Match over string using Windows, `PowerShell` `-Like` syntax.
 ///
@@ -48,6 +48,73 @@ pub fn glob_match(input: &str, pattern: &str, case_sensitive: bool) -> bool {
     }
 
     true
+}
+
+/* ─────────────────────────────── Suggestions ────────────────────────────── */
+
+/// Levenshtein edit distance between two strings (case-insensitive).
+#[must_use]
+pub fn levenshtein(a: &str, b: &str) -> usize {
+    let a = a.to_lowercase();
+    let b = b.to_lowercase();
+    let a = a.as_bytes();
+    let b = b.as_bytes();
+
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut curr = vec![0; b.len() + 1];
+
+    for (i, &ca) in a.iter().enumerate() {
+        curr[0] = i + 1;
+        for (j, &cb) in b.iter().enumerate() {
+            let cost = usize::from(ca != cb);
+            curr[j + 1] = (prev[j] + cost)
+                .min(prev[j + 1] + 1)
+                .min(curr[j] + 1);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+
+    prev[b.len()]
+}
+
+/// Find the closest matches for `input` among `candidates`.
+///
+/// Uses two strategies to catch both typos and incomplete names:
+/// 1. **Edit distance** — candidates within `max(2, input.len() / 3)` edits.
+/// 2. **Prefix match** — candidates that start with `input` (case-insensitive).
+///
+/// Returns up to `max_results` candidates, sorted by edit distance.
+#[must_use]
+pub fn suggest_closest<'a>(
+    input: &str,
+    candidates: impl Iterator<Item = &'a str>,
+    max_results: usize,
+) -> Vec<&'a str> {
+    let threshold = 2.max(input.len() / 3);
+    let input_lower = input.to_lowercase();
+
+    let mut scored: Vec<(&str, usize)> = candidates
+        .filter_map(|c| {
+            let dist = levenshtein(input, c);
+
+            // Typo match: within edit distance threshold.
+            if dist > 0 && dist <= threshold {
+                return Some((c, dist));
+            }
+
+            // Prefix match: input is a prefix of the candidate.
+            if c.to_lowercase().starts_with(&input_lower) && c.len() != input.len() {
+                return Some((c, dist));
+            }
+
+            None
+        })
+        .collect();
+
+    scored.sort_by_key(|&(_, dist)| dist);
+    scored.dedup_by_key(|&mut (name, _)| name);
+    scored.truncate(max_results);
+    scored.into_iter().map(|(name, _)| name).collect()
 }
 
 #[cfg(test)]
@@ -96,5 +163,37 @@ mod tests {
     fn test_wildcard_only() {
         assert!(glob_match("ANYTHING", "*", false));
         assert!(glob_match("", "*", false));
+    }
+
+    #[test]
+    fn test_levenshtein() {
+        assert_eq!(levenshtein("", ""), 0);
+        assert_eq!(levenshtein("abc", "abc"), 0);
+        assert_eq!(levenshtein("_PBE", "_PEB"), 1);
+        assert_eq!(levenshtein("kitten", "sitting"), 3);
+        // Case-insensitive.
+        assert_eq!(levenshtein("_peb", "_PEB"), 0);
+    }
+
+    #[test]
+    fn test_suggest_closest() {
+        let names = ["_PEB", "_PEB32", "_PEB_LDR_DATA", "_TEB", "_CONTEXT"];
+        let suggestions = suggest_closest("_PBE", names.iter().copied(), 3);
+        assert_eq!(suggestions[0], "_PEB");
+        assert!(suggestions.contains(&"_TEB"));
+    }
+
+    #[test]
+    fn test_suggest_closest_prefix() {
+        let names = ["INVALID_HANDLE_VALUE", "INVALID_ATOM", "INVALID_SOCKET", "UNRELATED"];
+        let suggestions = suggest_closest("INVALID_HANDLE", names.iter().copied(), 5);
+        assert!(suggestions.contains(&"INVALID_HANDLE_VALUE"));
+    }
+
+    #[test]
+    fn test_suggest_closest_no_match() {
+        let names = ["_PEB", "_TEB", "_CONTEXT"];
+        let suggestions = suggest_closest("XYZXYZXYZ", names.iter().copied(), 3);
+        assert!(suggestions.is_empty());
     }
 }

@@ -6,4 +6,6 @@ edition.workspace = true
 [dependencies]
 clap.workspace = true
 bb-sdk.workspace = true
+bb-shared.workspace = true
 anyhow.workspace = true
+colored.workspace = true

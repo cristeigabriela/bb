@@ -29,7 +29,9 @@
 //! ```
 
 use bb_sdk::{Arch, HeaderConfig, PhntVersion, SdkMode};
+use bb_shared::suggest_closest;
 use clap::{Args, arg};
+use colored::Colorize;
 
 /* ─────────────────────────────────── CLI ────────────────────────────────── */
 
@@ -61,6 +63,39 @@ pub struct SharedArgs {
 
     #[arg(long, help = "Show clang diagnostics")]
     pub diagnostics: bool,
+}
+
+/* ────────────────────────────── Suggestions ──────────────────────────────── */
+
+/// Print a "did you mean?" hint to stderr when a non-glob pattern matches nothing.
+///
+/// Does nothing if `pattern` is `None` or contains a `*` wildcard.
+pub fn print_suggestions<'a>(
+    entity_kind: &str,
+    pattern: Option<&str>,
+    candidates: impl Iterator<Item = &'a str>,
+) {
+    let Some(pat) = pattern else { return };
+    if pat.contains('*') {
+        return;
+    }
+
+    let suggestions = suggest_closest(pat, candidates, 5);
+
+    eprintln!(
+        "{}{} no {} matching '{}'",
+        "error".red().bold(),
+        ":".bold(),
+        entity_kind,
+        pat.yellow(),
+    );
+    if !suggestions.is_empty() {
+        eprintln!("\n  {}\n", "did you mean?".bold());
+        for s in suggestions {
+            eprintln!("    {}", s.green());
+        }
+        eprintln!();
+    }
 }
 
 /* ─────────────────────────────────── SDK ────────────────────────────────── */
