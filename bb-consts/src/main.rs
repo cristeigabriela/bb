@@ -2,8 +2,8 @@ use anyhow::Result;
 use bb_clang::{ConstLookup, Constant, Enum, render_constants};
 use bb_cli::get_header_config;
 use bb_consts_lib::{
-    ConstFilter, build_lookup_table, collect_constants, collect_enums, parse_name_pattern,
-    resolve_macros,
+    ConstFilter, build_lookup_table, collect_constants, collect_enums, filter_constants_by_name,
+    parse_name_pattern, resolve_macros,
 };
 use bb_shared::glob_match;
 use clang::{Clang, Index};
@@ -81,10 +81,14 @@ fn main() -> Result<()> {
     let enums = collect_enums(&tu, &filter);
     let (mut vars, failed_macros) = collect_constants(&tu, &filter);
 
-    // Preprocess all macros.
+    // Build lookup from ALL collected constants (unfiltered by name) so that
+    // macros like `#define IMAGEHLP_SYMBOL_INFO_TLSRELATIVE SYMF_TLSREL`
+    // can resolve even when the referenced constant doesn't match the pattern.
     let mut known = build_lookup_table(&enums, &vars);
-    // Collect macros into `vars` and also resolve all the components.
     resolve_macros(&mut vars, &mut known, &failed_macros);
+
+    // Apply name filter AFTER resolution.
+    let vars = filter_constants_by_name(vars, &filter);
 
     if args.json {
         print_json(&enums, &vars, &filter)?;

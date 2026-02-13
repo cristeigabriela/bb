@@ -23,8 +23,6 @@ and it works against any SDK version, architecture, or PHNT release you throw at
 <h3 align="center">bb-types</h3>
 <p align="center"><sub>Struct and class layouts, right in your terminal</sub></p>
 
-<!-- TODO: Add a screenshot of bb-types CLI output (e.g. bb-types --struct PROCESS_BASIC_INFORMATION) -->
-<!-- Save to: media/bb-types-output.png -->
 <p align="center"><img src="./media/bb-types-output.png" alt="bb-types CLI output showing a struct layout with offsets, sizes, field names, and types" width="95%"></p>
 
 </td>
@@ -32,8 +30,6 @@ and it works against any SDK version, architecture, or PHNT release you throw at
 <h3 align="center">bb-consts</h3>
 <p align="center"><sub>Constants, enums, and macro definitions</sub></p>
 
-<!-- TODO: Add a screenshot of bb-consts CLI output (e.g. bb-consts --name GENERIC_* or bb-consts --enum FILE_INFORMATION_CLASS) -->
-<!-- Save to: media/bb-consts-output.png -->
 <p align="center"><img src="./media/bb-consts-output.png" alt="bb-consts CLI output showing enum values and constants with their numeric values" width="95%"></p>
 
 </td>
@@ -46,8 +42,6 @@ and it works against any SDK version, architecture, or PHNT release you throw at
 <h3 align="center">bb-types-tui</h3>
 <p align="center"><sub>Interactive struct browser</sub></p>
 
-<!-- TODO: Add a screenshot of the bb-types-tui application in action -->
-<!-- Save to: media/bb-types-tui.png -->
 <p align="center"><img src="./media/bb-types-tui.png" alt="bb-types-tui showing an interactive TUI with file tree, search bar, and struct display" width="95%"></p>
 
 </td>
@@ -55,8 +49,6 @@ and it works against any SDK version, architecture, or PHNT release you throw at
 <h3 align="center">bb-consts-tui</h3>
 <p align="center"><sub>Interactive constant browser</sub></p>
 
-<!-- TODO: Add a screenshot of the bb-consts-tui application in action -->
-<!-- Save to: media/bb-consts-tui.png -->
 <p align="center"><img src="./media/bb-consts-tui.png" alt="bb-consts-tui showing an interactive TUI with file tree, search bar, and constant display" width="95%"></p>
 
 </td>
@@ -96,56 +88,59 @@ Windows ships with thousands of C/C++ headers (the **Windows SDK**) that define 
 
 ### Building
 
-You need a **Visual Studio Developer Command Prompt** (for SDK include paths), **Rust** (edition 2024), and **LLVM / libclang**.
+On a Windows host, you will need the following:
+- Visual Studio 2019/2022 **Build Tools**
+- LLVM + Clang (**libclang.dll**) version **>=18.1**
+- Rust **2024 edition**
 
-```
+Afterwards, you may produce the binaries by invoking the following command:
+
+```bash
 cargo build --release
 ```
-
-The binaries land in `target/release/`.
 
 ### First commands
 
 **Inspect a struct layout:**
 
-```
-bb-types --struct PROCESS_BASIC_INFORMATION
+```bash
+bb-types --struct _PEB
 ```
 
 **Recurse into nested types:**
 
-```
-bb-types --phnt --struct PEB --depth 1
+```bash
+bb-types --phnt --struct PEB --depth 2
 ```
 
 **Search for constants by wildcard:**
 
-```
+```bash
 bb-consts --name GENERIC_*
 ```
 
 **Scope to a specific enum:**
 
-```
-bb-consts --enum FILE_INFORMATION_CLASS
+```bash
+bb-consts --enum _MINIDUMP_TYPE
 ```
 
 **Use `Enum::Constant` syntax to search within enums:**
 
-```
-bb-consts --name "FILE_INFORMATION_CLASS::*Ea*"
+```bash
+bb-consts --name "_MINIDUMP_TYPE::*"
 ```
 
 **Target a different architecture from your host:**
 
-```
-bb-types --arch arm64 --struct CONTEXT
+```bash
+bb-types --arch arm64 --struct _CONTEXT
 ```
 
 **Export as JSON for your own tooling:**
 
-```
-bb-types --struct PROCESS_BASIC_INFORMATION --json
+```bash
+bb-types --arch arm64 --struct _CONTEXT --json
 ```
 
 ---
@@ -159,20 +154,20 @@ bb-types --struct PROCESS_BASIC_INFORMATION --json
 
 ### CLI applications
 
-|   | Crate | What it does |
-| --- | --- | --- |
-| | [`bb-types`](bb-types/) | Inspect struct and class layouts |
-| | [`bb-consts`](bb-consts/) | Inspect constants, enums, and `#define` macros |
+| Crate | What it does |
+| --- | --- |
+| [`bb-types`](bb-types/) | Inspect struct and class layouts |
+| [`bb-consts`](bb-consts/) | Inspect constants, enums, and `#define` macros |
 
 </td>
 <td width="50%" valign="top">
 
 ### TUI applications
 
-|   | Crate | What it does |
-| --- | --- | --- |
-| | [`bb-types-tui`](bb-types-tui/) | Interactive struct browser |
-| | [`bb-consts-tui`](bb-consts-tui/) | Interactive constant browser |
+| Crate | What it does |
+| --- | --- |
+| [`bb-types-tui`](bb-types-tui/) | Interactive struct browser |
+| [`bb-consts-tui`](bb-consts-tui/) | Interactive constant browser |
 
 </td>
 </tr>
@@ -238,7 +233,7 @@ bb-consts --phnt --name "STATUS_*"
 
 ## Architecture support
 
-Both tools support cross-compilation via `--arch` -- inspect struct layouts for any target from any host:
+Both tools support cross-compilation via `--arch` — inspect struct layouts for any target from any host:
 
 | Flag | Target | Notes |
 | --- | --- | --- |
@@ -255,37 +250,13 @@ bb-types --arch arm64 --struct CONTEXT
 
 ## How it works
 
-Neither tool reads header files off disk directly. Instead, `bb-sdk` builds a synthetic `#include` cascade at runtime (covering the relevant subset of SDK or PHNT headers) and hands it to **libclang** as an in-memory buffer. The parsed AST is then walked by `bb-clang` to extract typed representations of structs, fields, enums, and constants.
+The flow is described below:
 
-For macros specifically, `bb-consts` does a two-pass resolution: first pass evaluates simple literals and variables, second pass substitutes known constant names into unresolved macro token streams before re-evaluating. This handles things like `#define GENERIC_ALL (GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE)`.
+<p align="center"><img src="./media/bb-diagram.png" alt="Diagram showing the bb crate dependency flow: bb-sdk feeds into bb-clang, which branches into bb-types and bb-consts (CLI frontends), each flowing down to bb-types-tui and bb-consts-tui (TUI frontends)" width="75%"></p>
 
-<table>
-<tr></tr>
-<tr>
-<td>
 
-```
-                  ┌──────────┐
-                  │  bb-sdk  │  Discovers SDK, builds synthetic headers
-                  └────┬─────┘
-                       │
-                       ▼
-                  ┌──────────┐
-                  │ bb-clang │  Parses AST, extracts structured entities
-                  └────┬─────┘
-                       │
-              ┌────────┴────────┐
-             ▼                 ▼
-        ┌──────────┐     ┌───────────┐
-        │ bb-types │     │ bb-consts │      CLI frontends
-        └──────────┘     └───────────┘
-              │                 │
-             ▼                 ▼
-       ┌──────────────┐  ┌───────────────┐
-       │ bb-types-tui │  │ bb-consts-tui │  TUI frontends
-       └──────────────┘  └───────────────┘
-```
+We use `bb-sdk` to collect Windows SDK specific data, then we generate a SDK-specific "synthetic header" (also known as an `Unsaved`/`CXUnsavedFile` in the Clang-world) which will be passed through partial compilation with `libclang.dll` and in turn give us a `TranslationUnit`.
 
-</td>
-</tr>
-</table>
+From the translation unit, we lift the AST entities into `bb-clang` serializable objects, and we use the information that we expose there to develop the tools.
+
+For macros specifically, `bb-consts` does a two-pass resolution: first pass evaluates simple literals and variables, second pass substitutes known constant names into unresolved macro token streams before re-evaluating. This handles things like `#define PROCESS_ALL_ACCESS (STANDARD_RIGHTS_REQUIRED | SYNCHRONIZE | 0xFFFF)`.

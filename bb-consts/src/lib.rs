@@ -108,7 +108,13 @@ pub fn collect_enums<'a>(tu: &'a TranslationUnit<'a>, filter: &ConstFilter) -> V
 /// Returns directly-evaluated constants and failed macro entities (for later
 /// resolution with a lookup).
 ///
-/// Collects constants that match filter settings.
+/// Only header-filters during collection. Name filtering is intentionally
+/// deferred so that the lookup table built from these results contains every
+/// constant needed for cross-reference substitution (e.g. `#define FOO BAR`
+/// where `BAR` wouldn't match the caller's name pattern).
+///
+/// Use [`filter_constants_by_name`] after macro resolution to apply the name
+/// pattern.
 #[must_use]
 pub fn collect_constants<'a>(
     tu: &'a TranslationUnit<'a>,
@@ -119,7 +125,7 @@ pub fn collect_constants<'a>(
     }
 
     let entities: Vec<_> = iter_constants(tu)
-        .filter(|e| filter.matches_header(e) && filter.matches_const_name(e))
+        .filter(|e| filter.matches_header(e))
         .collect();
 
     let mut vars = Vec::new();
@@ -134,6 +140,24 @@ pub fn collect_constants<'a>(
     }
 
     (vars, failed)
+}
+
+/// Filter constants by the name pattern in the given filter.
+///
+/// Call this **after** macro resolution so that every constant had a chance
+/// to be resolved against the full lookup table.
+#[must_use]
+pub fn filter_constants_by_name<'a>(
+    constants: Vec<Constant<'a>>,
+    filter: &ConstFilter,
+) -> Vec<Constant<'a>> {
+    match filter.const_pattern.as_deref() {
+        Some(pat) => constants
+            .into_iter()
+            .filter(|c| glob_match(c.get_name(), pat, filter.case_sensitive))
+            .collect(),
+        None => constants,
+    }
 }
 
 /// Iterate over enum declarations in a [`TranslationUnit`].
