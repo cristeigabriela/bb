@@ -1,0 +1,9 @@
+[package]
+name = "bb-cli"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+clap.workspace = true
+bb-sdk.workspace = true
+anyhow.workspace = true

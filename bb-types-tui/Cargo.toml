@@ -1,0 +1,16 @@
+[package]
+name = "bb-types-tui"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+bb-tui = { workspace = true }
+bb-clang = { workspace = true }
+bb-shared = { workspace = true }
+bb-cli = { workspace = true }
+bb-types = { path = "../bb-types" }
+
+clang = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }
+ratatui = { workspace = true }

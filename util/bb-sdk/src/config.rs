@@ -149,8 +149,7 @@ impl HeaderConfig {
     #[must_use]
     pub fn clang_args(&self) -> Vec<String> {
         let (arch, sdk) = match self {
-            Self::WinSdk { arch, sdk, .. } => (*arch, sdk),
-            Self::Phnt { arch, sdk, .. } => (*arch, sdk),
+            Self::WinSdk { arch, sdk, .. } | Self::Phnt { arch, sdk, .. } => (*arch, sdk),
         };
 
         let mut args = vec!["-target".into(), arch.target_triple().into()];

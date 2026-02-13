@@ -7,10 +7,15 @@ edition.workspace = true
 name = "bb-consts"
 path = "src/main.rs"
 
+[lib]
+name = "bb_consts_lib"
+path = "src/lib.rs"
+
 [dependencies]
 bb-sdk.workspace = true
 bb-clang.workspace = true
 bb-shared.workspace = true
+bb-cli.workspace = true
 clang.workspace = true
 clap.workspace = true
 anyhow.workspace = true

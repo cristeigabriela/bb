@@ -1,5 +1,5 @@
 [workspace]
-members = ["bb-types", "util/bb-clang", "util/bb-shared", "util/bb-sdk", "bb-consts"]
+members = ["bb-types", "util/bb-clang", "util/bb-shared", "util/bb-sdk", "util/bb-cli", "util/bb-tui", "bb-consts", "bb-consts-tui", "bb-types-tui"]
 resolver = "3"
 
 [workspace.package]
@@ -10,6 +10,8 @@ edition = "2024"
 bb-clang = { path = "util/bb-clang" }
 bb-shared = { path = "util/bb-shared" }
 bb-sdk = { path = "util/bb-sdk" }
+bb-cli = { path = "util/bb-cli" }
+bb-tui = { path = "util/bb-tui" }
 
 clang = { version = "2.0.0", features = ["clang_10_0"] }
 clap = { version = "4", features = ["derive"] }
@@ -19,3 +21,4 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 colored = "2"
 cexpr = "0.6.0"
+ratatui = "0.30.0"

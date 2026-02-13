@@ -1,0 +1,8 @@
+[package]
+name = "bb-tui"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ratatui = { workspace = true }
+anyhow = { workspace = true }
