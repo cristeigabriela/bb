@@ -74,6 +74,14 @@ impl<'a> Constant<'a> {
         let body = &tokens[1..];
         let mut i = 0;
         while i < body.len() {
+            // gabriela says:
+            //
+            // I would just like to apologize for this MESS!! i dont like it either!
+            //
+            // I wish there was a way to take the source-range and analyze everything
+            // as the underlying AST entities so that I could filter all CStyleCastExpr's
+            // but... there is no way afaik. so we do it the hacky way. :c
+            //
             // Strip C-style cast patterns: `( TYPE )` where TYPE is one or more
             // identifier/keyword tokens and none of the identifiers are known
             // constants. This handles macros like:
