@@ -20,9 +20,8 @@ pub struct Enum<'a> {
     is_anonymous: bool,
     #[serde(skip)]
     type_: Type<'a>,
-    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "type")]
     type_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     location: Option<SourceLocation>,
     constants: Vec<Constant<'a>>,
 }

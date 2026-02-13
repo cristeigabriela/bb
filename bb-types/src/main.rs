@@ -107,20 +107,44 @@ fn print_display(structs: &[Struct], depth: usize, field_name: &Option<String>) 
     }
 }
 
-/// Print JSON of serialized [`Struct`]s and [`Field`]s as an array.
+/// Print JSON with a flat `types` array.
 ///
-/// # Arguments
-///
-/// * `structs` - The [`Struct`] entities to analyze and serialize.
-/// * `depth` - The depth of type expansion to be captured into the JSON array.
+/// Each type entry includes `referenced_types` listing the names of expandable
+/// child types. When `depth > 0`, those referenced types are also present as
+/// entries in the same array, so the consumer can look them up by name.
 fn print_json(structs: &[Struct], depth: usize) -> anyhow::Result<()> {
-    let mut all_structs: Vec<&Struct> = Vec::new();
-    let nested: Vec<_> = structs
-        .iter()
-        .flat_map(|s| s.extract_nested_types(depth))
-        .collect();
-    all_structs.extend(structs.iter());
-    all_structs.extend(nested.iter());
-    println!("{}", serde_json::to_string_pretty(&all_structs)?);
+    use std::collections::HashSet;
+
+    let mut all_types: Vec<serde_json::Value> = Vec::new();
+    let mut seen = HashSet::new();
+
+    // Helper: serialize a Struct and append its referenced_types names.
+    let to_json = |s: &Struct| -> anyhow::Result<serde_json::Value> {
+        let mut val = serde_json::to_value(s)?;
+        val.as_object_mut().unwrap().insert(
+            "referenced_types".to_string(),
+            serde_json::to_value(s.referenced_type_names())?,
+        );
+        Ok(val)
+    };
+
+    // Queried types first.
+    for s in structs {
+        seen.insert(s.get_name().to_string());
+        all_types.push(to_json(s)?);
+    }
+
+    // Expand nested types up to depth.
+    for s in structs {
+        for nested in s.extract_nested_types(depth) {
+            if seen.insert(nested.get_name().to_string()) {
+                all_types.push(to_json(&nested)?);
+            }
+        }
+    }
+
+    let command = std::env::args().collect::<Vec<_>>().join(" ");
+    let output = serde_json::json!({ "command": command, "types": all_types });
+    println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())
 }

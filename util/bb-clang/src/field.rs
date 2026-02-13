@@ -21,10 +21,10 @@ pub struct Field<'a> {
     type_: Type<'a>,
     #[serde(rename = "type")]
     type_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     location: Option<SourceLocation>,
+    #[serde(rename = "offset_bits")]
     offset: usize,
-    #[serde(rename = "offset_bytes")]
+    #[serde(rename = "offset")]
     offset_bytes: usize,
     size: usize,
     alignment: usize,

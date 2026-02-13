@@ -45,9 +45,9 @@ pub struct Constant<'a> {
     entity: Entity<'a>,
     name: String,
     value: ConstValue,
+    hex: String,
     #[serde(rename = "type")]
     type_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     location: Option<SourceLocation>,
     /// Raw macro body tokens (identifier flag + spelling). Empty for non-macros.
     #[serde(skip)]
@@ -56,7 +56,7 @@ pub struct Constant<'a> {
 
 impl<'a> Constant<'a> {
     /// Internal constructor for use by submodules.
-    pub(crate) const fn new(
+    pub(crate) fn new(
         entity: Entity<'a>,
         name: String,
         value: ConstValue,
@@ -64,10 +64,12 @@ impl<'a> Constant<'a> {
         location: Option<SourceLocation>,
         body_tokens: Vec<MacroBodyToken>,
     ) -> Self {
+        let hex = value.to_string();
         Self {
             entity,
             name,
             value,
+            hex,
             type_name,
             location,
             body_tokens,
@@ -169,10 +171,12 @@ impl<'a> TryFrom<Entity<'a>> for Constant<'a> {
             _ => return Err(ConstantError::NotConstant(kind)),
         };
 
+        let hex = value.to_string();
         Ok(Self {
             entity,
             name,
             value,
+            hex,
             type_name,
             location,
             body_tokens,

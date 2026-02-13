@@ -18,7 +18,6 @@ pub struct Struct<'a> {
     name: String,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     is_anonymous: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
     location: Option<SourceLocation>,
     size: Option<usize>,
     fields: Vec<Field<'a>>,
@@ -54,6 +53,37 @@ impl<'a> Struct<'a> {
     #[must_use]
     pub fn display(&self, depth: usize, field_filter: Option<&str>) -> String {
         display::render_struct(self, depth, field_filter)
+    }
+
+    /// Returns the names of expandable child types referenced by this struct's fields.
+    ///
+    /// Skips anonymous types (they have no meaningful name to look up).
+    /// Each name appears at most once, in field order.
+    #[must_use]
+    pub fn referenced_type_names(&self) -> Vec<String> {
+        let mut names = Vec::new();
+        let mut seen = HashSet::new();
+        for field in &self.fields {
+            if !field.has_children() {
+                continue;
+            }
+            let Some(decl) = field.get_underlying_type().get_declaration() else {
+                continue;
+            };
+            let is_anonymous = decl
+                .get_type()
+                .and_then(|t| t.is_anonymous())
+                .unwrap_or(false);
+            if is_anonymous {
+                continue;
+            }
+            if let Some(name) = decl.get_name() {
+                if seen.insert(name.clone()) {
+                    names.push(name);
+                }
+            }
+        }
+        names
     }
 
     /// Extracts all nested struct types up to the specified depth for JSON serialization.

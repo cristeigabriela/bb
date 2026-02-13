@@ -22,12 +22,24 @@ pub type ConstLookup = HashMap<String, ConstValue>;
 ///
 /// This structure also supports utilities such as future serialization if it's contents,
 /// and hex/decimal formatting depending on the match arm.
-#[derive(Debug, Clone, Copy, Serialize)]
-#[serde(tag = "kind", content = "value")]
+#[derive(Debug, Clone, Copy)]
 pub enum ConstValue {
     I64(i64),
     U64(u64),
     F64(f64),
+}
+
+impl Serialize for ConstValue {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Self::I64(v) => serializer.serialize_i64(*v),
+            Self::U64(v) => serializer.serialize_u64(*v),
+            Self::F64(v) => serializer.serialize_f64(*v),
+        }
+    }
 }
 
 impl ConstValue {

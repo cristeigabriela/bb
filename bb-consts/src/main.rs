@@ -149,9 +149,8 @@ fn print_display(enums: &[Enum], vars: &[Constant], filter: &ConstFilter, lookup
 fn print_json(enums: &[Enum], vars: &[Constant], filter: &ConstFilter) -> Result<()> {
     #[derive(serde::Serialize)]
     struct Output<'a> {
-        #[serde(skip_serializing_if = "Vec::is_empty")]
+        command: String,
         enums: Vec<&'a Enum<'a>>,
-        #[serde(skip_serializing_if = "Vec::is_empty")]
         constants: Vec<&'a Constant<'a>>,
     }
 
@@ -167,6 +166,7 @@ fn print_json(enums: &[Enum], vars: &[Constant], filter: &ConstFilter) -> Result
         .collect();
 
     let output = Output {
+        command: std::env::args().collect::<Vec<_>>().join(" "),
         enums: filtered_enums,
         constants: vars.iter().collect(),
     };
