@@ -32,16 +32,20 @@ struct Args {
     filter: Option<String>,
 
     #[arg(
-        short,
+        short = 'n',
         long,
         help = "Constant name pattern (supports * wildcard, Enum::Const syntax)"
     )]
     name: Option<String>,
 
-    #[arg(short, long = "enum", help = "Enum name pattern (supports * wildcard)")]
+    #[arg(
+        short = 'e',
+        long = "enum",
+        help = "Enum name pattern (supports * wildcard)"
+    )]
     enum_name: Option<String>,
 
-    #[arg(short, long = "case-sensitive", help = "Case-sensitive matching")]
+    #[arg(short = 'c', long = "case-sensitive", help = "Case-sensitive matching")]
     case_sensitive: bool,
 }
 

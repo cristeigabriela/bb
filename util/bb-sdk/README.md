@@ -1,41 +1,31 @@
 # bb-sdk
 
-Windows SDK and PHNT header management for the bb workspace.
+> Synthetic header generation for **Windows SDK** and **PHNT**.
 
-Locates SDK installations, generates synthetic in-memory headers, and drives
-libclang parsing. Neither `bb-types` nor `bb-consts` touch header files
-directly -- this crate handles all of that.
+`bb-sdk` is responsible for generating synthetic headers that allow `bb-clang` to later index and parse them.
 
-## Exports
+To get there however, the crate also takes care of the following things:
 
-| Export | What |
-|---|---|
-| `HeaderConfig` | Top-level config: WinSDK or PHNT, with arch/mode. Call `.parse()` to get a `TranslationUnit` |
-| `Arch` | `X86`, `Amd64`, `Arm`, `Arm64` -- target triples and preprocessor defines |
-| `SdkMode` | `User` or `Kernel` |
-| `SdkInfo` | Detected SDK include directory and version |
-| `PhntVersion` | Win2000 through Win11-22H2 (23 variants) |
-| `PHNT_HEADER` | The entire PHNT header embedded at compile time via `include_str!` |
-| `get_sdk_info` | Read SDK paths from environment variables |
-| `sdk_header` | Generate the synthetic `#include` cascade for Windows SDK |
-| `phnt_synthetic_header` | Generate the synthetic header for PHNT |
-| `parse_winsdk`, `parse_phnt` | Convenience parsing functions |
+- Checking that your environment is set up with **Windows SDK**;
+- Parsing your environment's latest **Windows SDK** version;
+    - Checking if you have all the pre-requisites necessary for generating a building kernel-mode SDK, if applicable.
 
-Also re-exports `Struct`, `Field`, `StructError`, `FieldError` from `bb-clang`.
+This crate also takes on the responsibility to handle versions for the provided SDKs.
 
-## How synthetic headers work
+---
 
-Instead of pointing clang at a real `.h` file on disk, this crate builds a
-string of `#include` directives covering the relevant subset of headers
-(user-mode: `windows.h`, `winternl.h`, `dbghelp.h`, crypto, networking, etc.;
-kernel-mode: `ntddk.h`, `wdm.h`, `ntifs.h`, `fltkernel.h`, etc.) and passes
-it to libclang as an `Unsaved` buffer. No temp files.
+## Architectures
 
-For PHNT, the header content itself is compiled into the binary, prepended with
-the appropriate base includes and `PHNT_VERSION` define, and fed in the same way.
+We expose multiple target architecture options for our SDKs:
 
-## Environment
+`x86` | `amd64` | `arm` | `arm64`
 
-Expects a Visual Studio Developer Command Prompt (or equivalent) that sets
-`WindowsSdkDir` and `WindowsSDKLibVersion`. Kernel mode additionally requires
-WDK to be installed.
+### Header configuration
+
+These are later relevant when you're defining a header configuration.
+
+From a header configuration, you can obtain a translation unit.
+
+In preparing this, the header configuration's information will be used to provide stuff like command-line arguments (such as the target architecture), and more.
+
+The result will be a translation unit that is created from an in-memory file.

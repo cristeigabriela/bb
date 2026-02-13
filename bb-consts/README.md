@@ -1,100 +1,42 @@
 # bb-consts
 
-Constant, enum, and `#define` macro inspector for Windows headers.
+> CLI application for querying and exporting `Enum`/`Constant` entities from **Windows SDK** / **PHNT** headers.
 
-Parses Windows SDK or PHNT headers through libclang and extracts numeric
-constants from three sources: enum declarations, `const`/`constexpr` variables,
-and preprocessor `#define` macros. Output is either a colorized aligned tree
-or JSON.
+`bb-consts` is a CLI application dedicated to querying, and exporting, information extracted from `Enum`/`Constant` entities with `bb-clang`, from the respective SDK (**Windows SDK**/**PHNT**) of your choice.
 
-Composite macros -- ones built from other named constants -- get their
-components resolved and shown inline so you can see what went into the final
-value.
+---
 
-## Usage
+## Arguments
 
-Run from a Visual Studio Developer Command Prompt.
+### Specific to `bb-consts`
 
-```
-bb-consts [OPTIONS]
-```
+| Flag | Description |
+| --- | --- |
+| `--name` / `-n` | Filter for constants. Use `::` in the query to scope your search to enums |
+| `--enum` / `-e` | Filter for enums being searched for |
+| `--filter` / `-H` | Filter your searches to a specific header |
+| `--case-sensitive` / `-c` | Case-sensitive matching |
+| `--json` | Output as a JSON array of constants (plus extra information) |
 
-### Searching constants
+---
 
-```
-bb-consts --name GENERIC_*                 # wildcard on constant name
-bb-consts --name STATUS_ACCESS_DENIED      # exact match
-bb-consts --name "FILE_*" -H fileapi.h     # scoped to a header
-```
+### Shared with `bb-types`
 
-### Searching enums
+<details>
+<summary>Expand shared arguments</summary>
 
-```
-bb-consts --enum FILE_INFORMATION_CLASS    # all values in an enum
-bb-consts --enum *PROCESS*                 # wildcard on enum name
-```
+<br>
 
-### Scoped enum::constant syntax
+These arguments are managed by [`bb-cli`](./util/bb-cli/) and are shared across all CLI apps.
 
-Use `::` to search for constants within a specific enum:
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--winsdk [VERSION]` | *(default SDK)* | Use Windows SDK headers. Optionally specify a version present in your environment |
+| `--phnt [VERSION]` | -- | Use PHNT headers instead. Optionally specify a Windows version target |
+| `--mode` / `-m` | `user` | `user` or `kernel` (defines `_KERNEL_MODE` for kernel) |
+| `--arch` / `-a` | host | `x86` / `amd64` / `arm` / `arm64` -- supports cross-compilation |
+| `--diagnostics` | off | Show Clang diagnostics. Useful for troubleshooting |
 
-```
-bb-consts --name "FILE_INFORMATION_CLASS::*Ea*"
-```
+**PHNT version targets:** `win2k` `win-xp` `ws03` `vista` `win7` `win8` `win-blue` `threshold` `threshold2` `redstone` `redstone2` `redstone3` `redstone4` `redstone5` `19H1` `19H2` `20H1` `20H2` `21H1` `Win10-21H2` `Win10-22H2` `win11` `Win11-22H2`
 
-This filters to the `FILE_INFORMATION_CLASS` enum and shows only constants
-matching `*Ea*`.
-
-### PHNT
-
-```
-bb-consts --phnt --name "STATUS_*"
-bb-consts --phnt --enum "PS_*"
-```
-
-### Cross-architecture and kernel mode
-
-```
-bb-consts --arch x86 --name PAGE_SIZE
-bb-consts --mode kernel --enum *POOL*
-```
-
-### JSON output
-
-```
-bb-consts --enum FILE_INFORMATION_CLASS --json
-```
-
-Outputs `{ "enums": [...], "constants": [...] }`, omitting empty arrays.
-
-## How macro resolution works
-
-Many Windows `#define` macros reference other named constants:
-
-```c
-#define GENERIC_ALL (GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE)
-```
-
-`bb-consts` does a two-pass evaluation:
-
-1. First pass: evaluate simple numeric literals, enum values, and `const` variables
-2. Second pass: for macros that failed the first pass, substitute known constant
-   names with their resolved values and re-evaluate
-
-This means composite macros display both their final value and a breakdown of
-their components.
-
-## All options
-
-| Flag | Short | Description |
-|---|---|---|
-| `--winsdk [VERSION]` | | Use Windows SDK headers |
-| `--phnt [VERSION]` | | Use PHNT headers |
-| `--mode <user\|kernel>` | `-m` | Target mode (default: user) |
-| `--arch <x86\|amd64\|arm\|arm64>` | `-a` | Architecture (default: amd64) |
-| `--name <PATTERN>` | `-n` | Constant name pattern (`*` wildcard, `Enum::Const` syntax) |
-| `--enum <PATTERN>` | `-e` | Enum name pattern (`*` wildcard) |
-| `--filter <HEADER>` | `-H` | Filter by header filename |
-| `--case-sensitive` | `-c` | Case-sensitive matching |
-| `--json` | | Output as JSON |
-| `--diagnostics` | | Show clang diagnostics |
+</details>

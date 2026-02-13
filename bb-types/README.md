@@ -1,88 +1,43 @@
 # bb-types
 
-Struct and class layout inspector for Windows headers.
+> CLI application for querying and exporting `Type` entities from **Windows SDK** / **PHNT** headers.
 
-Parses Windows SDK or PHNT headers through libclang and prints field-level
-layout information: byte offsets, sizes, type names, and source locations.
-Output is either a colorized WinDbg `dt`-style tree or JSON.
+`bb-types` is a CLI application dedicated to querying, and exporting, information extracted from `Type` entities with `bb-clang`, from the respective SDK (**Windows SDK**/**PHNT**) of your choice.
 
-## Usage
+---
 
-Run from a Visual Studio Developer Command Prompt (needs SDK include paths).
+## Arguments
 
-```
-bb-types [OPTIONS]
-```
+### Specific to `bb-types`
 
-### Header source
+| Flag | Description |
+| --- | --- |
+| `--struct` / `-s` | Filter for the structs being searched for |
+| `--field` / `-f` | Filter for a field within a struct. Does not nest. Compatible with depth |
+| `--depth` / `-d` | Depth of inline field type expansion |
+| `--filter` / `-H` | Filter your searches to a specific header |
+| `--case-sensitive` / `-c` | Case-sensitive matching |
+| `--json` | Output as a JSON array of types (plus extra information) |
 
-By default, uses the Windows SDK version detected from your environment.
+---
 
-```
-bb-types --struct PEB                          # Windows SDK (default)
-bb-types --winsdk 10.0.22621.0 --struct PEB    # specific SDK version
-bb-types --phnt --struct PEB                   # PHNT headers (Win11 default)
-bb-types --phnt win7 --struct PEB              # PHNT targeting Win7
-```
+### Shared with `bb-consts`
 
-`--winsdk` and `--phnt` are mutually exclusive.
+<details>
+<summary>Expand shared arguments</summary>
 
-### Filtering
+<br>
 
-```
-bb-types --struct PROCESS_*              # wildcard on struct name
-bb-types --struct PEB --field *Ldr*      # filter fields within a struct
-bb-types -H winternl.h --struct *        # only structs from a specific header
-bb-types --struct PEB -c                 # case-sensitive matching
-```
+These arguments are managed by [`bb-cli`](./util/bb-cli/) and are shared across all CLI apps.
 
-### Nested types
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--winsdk [VERSION]` | *(default SDK)* | Use Windows SDK headers. Optionally specify a version present in your environment |
+| `--phnt [VERSION]` | -- | Use PHNT headers instead. Optionally specify a Windows version target |
+| `--mode` / `-m` | `user` | `user` or `kernel` (defines `_KERNEL_MODE` for kernel) |
+| `--arch` / `-a` | host | `x86` / `amd64` / `arm` / `arm64` -- supports cross-compilation |
+| `--diagnostics` | off | Show Clang diagnostics. Useful for troubleshooting |
 
-By default, only top-level fields are shown. Use `--depth` to expand:
+**PHNT version targets:** `win2k` `win-xp` `ws03` `vista` `win7` `win8` `win-blue` `threshold` `threshold2` `redstone` `redstone2` `redstone3` `redstone4` `redstone5` `19H1` `19H2` `20H1` `20H2` `21H1` `Win10-21H2` `Win10-22H2` `win11` `Win11-22H2`
 
-```
-bb-types --phnt --struct PEB --depth 2
-```
-
-This recursively expands fields that are structs/classes up to the given depth.
-Cycle detection prevents infinite recursion on self-referential types.
-
-### Cross-architecture
-
-```
-bb-types --arch x86 --struct CONTEXT
-bb-types --arch arm64 --struct CONTEXT
-```
-
-### Kernel mode
-
-```
-bb-types --mode kernel --struct DRIVER_OBJECT
-```
-
-Requires WDK headers to be available.
-
-### JSON output
-
-```
-bb-types --struct PEB --depth 1 --json
-```
-
-Outputs a JSON array of structs and their fields. Nested types (from `--depth`)
-are flattened into the array and deduplicated.
-
-## All options
-
-| Flag | Short | Description |
-|---|---|---|
-| `--winsdk [VERSION]` | | Use Windows SDK headers |
-| `--phnt [VERSION]` | | Use PHNT headers |
-| `--mode <user\|kernel>` | `-m` | Target mode (default: user) |
-| `--arch <x86\|amd64\|arm\|arm64>` | `-a` | Architecture (default: amd64) |
-| `--struct <PATTERN>` | `-s` | Struct name pattern (`*` wildcard) |
-| `--field <PATTERN>` | `-f` | Field name pattern (`*` wildcard) |
-| `--filter <HEADER>` | `-H` | Filter by header filename |
-| `--case-sensitive` | `-c` | Case-sensitive matching |
-| `--depth <N>` | `-d` | Nested type expansion depth (default: 0) |
-| `--json` | | Output as JSON |
-| `--diagnostics` | | Show clang diagnostics |
+</details>

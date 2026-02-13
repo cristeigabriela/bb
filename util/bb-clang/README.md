@@ -1,37 +1,49 @@
 # bb-clang
 
-Libclang abstraction layer for the bb workspace.
+> Structured representations of C/C++ entities, powered by libclang.
 
-Takes raw `clang::Entity` values from a parsed translation unit and turns them
-into typed Rust objects you can query, filter, serialize, and display.
+`bb-clang` is the initial crate that this project started with, in the hopes of me becoming more familiar with Clang and its concepts.
 
-## Exports
+Instead of working over something like clang bindings to Rust, we use [`clang-rs`](https://github.com/KyleMayes/clang-rs) by KyleMayes to do our bidding.
 
-| Export | What |
-|---|---|
-| `Struct` | Struct/class declaration with fields, size, source location |
-| `Field` | A field within a struct -- offset, size, type, nesting support |
-| `Enum` | Enum declaration with its constants |
-| `Constant` | A constant from an enum, `const` variable, or `#define` macro |
-| `ConstValue` | The value itself: `I64`, `U64`, or `F64` |
-| `ConstLookup` | `HashMap<String, ConstValue>` for macro name resolution |
-| `render_constants` | Render a slice of constants as a colored aligned tree |
-| `SourceLocation` | File, line, column from the original header |
-| `StructError`, `FieldError`, `EnumError`, `ConstantError` | Error types |
+---
 
-Also re-exports `Entity`, `EntityKind`, `Index`, `TranslationUnit`, `Unsaved`
-from the `clang` crate.
+## Design
 
-## Display
+`bb-clang` is just a sort-of frontend to specific kinds of entities you will encounter in the AST.
 
-Structs render in WinDbg `dt` style with Unicode box-drawing, colored columns
-(yellow offsets, green sizes, cyan types), and recursive expansion with cycle
-detection.
+The purpose is to take in the entity object, and lift it to a structured representation of itself. Some of them would be:
 
-Constants render as aligned tables with inline macro composition breakdown
-(showing which named constants contribute to a composite `#define`).
+- **[`Struct`](./src/struct_.rs)** -- A structured representation of C/C++ `struct` (or `class`) declarations. They most often contain [`Field`](./src/field.rs)s.
 
-## Traits
+- **[`Field`](./src/field.rs)** -- A structured representation of C/C++ field declarations. They are always the semantic children of [`Struct`](./src/struct_.rs)s and their declaration's underlying type might be used to obtain a new [`Struct`](./src/struct_.rs) as well.
 
-Extends `clang::Type` with: `AnonymousType`, `DeclarationKind`,
-`UnderlyingType`, `HasChildrenType` -- see `bb_clang::traits`.
+- **[`Enum`](./src/enum_.rs)** -- A structured representation of C/C++ enum declarations. They most often contain [`Constant`](./src/constant/mod.rs) of the specific enum constant declaration kind, and they have an associated type.
+
+- **[`Constant`](./src/constant/mod.rs)** -- A generic representation of all constants (variable declarations that evaluate at compile-time; enum constant declarations; simple, non-builtin macro definitions). We only support (and expose) numeric ones.
+  We evaluate the value of the macro after getting the tokens that make it up from Clang, and turning them into [`cexpr`](https://crates.io/crates/cexpr) tokens to evaluate them as a macro definition.
+  Moreover, we also support decomposing more complex macros into body tokens that will later be used in conjunction with [`cexpr`](https://crates.io/crates/cexpr) to parse the individual tokens that make it up, to understand how the value came to be.
+
+> **Note** — This is always subject to change, please make sure that you create your own understanding by reading the source code.
+
+---
+
+We also offer:
+
+- **[`SourceLocation`](./src/location.rs)** -- A simple abstraction over source locations.
+
+- **[`Traits`](./src/traits.rs)** -- Some extensions over clang-rs that made the experience personally better for me, but they may be a bit opinionated.
+
+---
+
+## Extras
+
+### Serialization
+
+Almost every type exposed is serializable, for the purpose of turning the information into easily distributable data.
+
+A core belief of `bb` is that it is meant to help others not only view the data, but interact with it, and extract it. You may build your own tooling from joining these utilities together through the frontend CLIs (with the `--json` flag.)
+
+### Pretty displays
+
+We implement pretty display helpers for most of the entities here. They are later used in the CLI tooling.

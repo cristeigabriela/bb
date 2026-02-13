@@ -121,18 +121,6 @@ impl<'a> Constant<'a> {
     }
 }
 
-/// Extract macro body tokens as [`MacroBodyToken`].
-fn extract_body_tokens(tokens: &[Token]) -> Vec<MacroBodyToken> {
-    tokens
-        .iter()
-        .skip(1) // skip macro name
-        .map(|t| MacroBodyToken {
-            is_identifier: t.get_kind() == TokenKind::Identifier,
-            lit_representation: t.get_spelling(),
-        })
-        .collect()
-}
-
 /* ─────────────────────────────── Conversions ────────────────────────────── */
 
 /// Attempt to generate [`Constant`] from supported entities.
@@ -190,4 +178,18 @@ impl<'a> TryFrom<Entity<'a>> for Constant<'a> {
             body_tokens,
         })
     }
+}
+
+/* ──────────────────────────────── Utilities ─────────────────────────────── */
+
+/// Extract macro body tokens as [`MacroBodyToken`].
+fn extract_body_tokens(tokens: &[Token]) -> Vec<MacroBodyToken> {
+    tokens
+        .iter()
+        .skip(1) // skip macro name
+        .map(|t| MacroBodyToken {
+            is_identifier: t.get_kind() == TokenKind::Identifier,
+            lit_representation: t.get_spelling(),
+        })
+        .collect()
 }

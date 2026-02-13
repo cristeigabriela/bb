@@ -1,195 +1,291 @@
+<div align="center">
+
 # bb
 
-**Benowin Blanc** -- Windows through a detective's lens.
+**Benowin Blanc** — Windows through a detective's lens.
 
-A set of command-line tools that parse Windows SDK and PHNT headers via libclang
+A set of command-line tools that parse **Windows SDK** and **PHNT** headers via libclang
 and let you inspect what's actually in them: struct layouts, field offsets,
-enum values, constants, `#define` macros, the works.
+enum values, constants, `#define` macros — the works.
 
-Think of it as `dt` from WinDbg but you don't need a debugger running, and it
-works against any SDK version, architecture, or PHNT release you throw at it.
+Think of it as `dt` from WinDbg, but you don't need a debugger running,
+and it works against any SDK version, architecture, or PHNT release you throw at it.
 
----
-
-## What's in the box
-
-| Crate | What it does |
-|---|---|
-| [`bb-types`](bb-types/) | CLI -- inspect struct and class layouts |
-| [`bb-consts`](bb-consts/) | CLI -- inspect constants, enums, and `#define` macros |
-| [`bb-clang`](util/bb-clang/) | Library -- libclang abstractions for types and constants |
-| [`bb-sdk`](util/bb-sdk/) | Library -- Windows SDK / PHNT header management |
-| [`bb-shared`](util/bb-shared/) | Library -- small shared utilities |
+</div>
 
 ---
 
-## bb-types
+<br>
 
-Parses Windows headers and prints struct layouts in a WinDbg `dt`-style tree.
-Fields show their offset, size, name, and type -- colored and aligned.
+<table>
+<tr>
+<td width="50%">
+<h3 align="center">bb-types</h3>
+<p align="center"><sub>Struct and class layouts, right in your terminal</sub></p>
 
-```
-bb-types --struct PROCESS_BASIC_INFORMATION
-```
+<!-- TODO: Add a screenshot of bb-types CLI output (e.g. bb-types --struct PROCESS_BASIC_INFORMATION) -->
+<!-- Save to: media/bb-types-output.png -->
+<p align="center"><img src="./media/bb-types-output.png" alt="bb-types CLI output showing a struct layout with offsets, sizes, field names, and types" width="95%"></p>
 
-<!-- TODO: paste real output here -->
+</td>
+<td width="50%">
+<h3 align="center">bb-consts</h3>
+<p align="center"><sub>Constants, enums, and macro definitions</sub></p>
 
-Recurse into nested types with `--depth`:
+<!-- TODO: Add a screenshot of bb-consts CLI output (e.g. bb-consts --name GENERIC_* or bb-consts --enum FILE_INFORMATION_CLASS) -->
+<!-- Save to: media/bb-consts-output.png -->
+<p align="center"><img src="./media/bb-consts-output.png" alt="bb-consts CLI output showing enum values and constants with their numeric values" width="95%"></p>
 
-```
-bb-types --phnt --struct PEB --depth 1
-```
+</td>
+</tr>
+</table>
 
-Filter by field name:
+<table>
+<tr>
+<td width="50%">
+<h3 align="center">bb-types-tui</h3>
+<p align="center"><sub>Interactive struct browser</sub></p>
 
-```
-bb-types --struct PROCESS_BASIC_INFORMATION --field *Process*
-```
+<!-- TODO: Add a screenshot of the bb-types-tui application in action -->
+<!-- Save to: media/bb-types-tui.png -->
+<p align="center"><img src="./media/bb-types-tui.png" alt="bb-types-tui showing an interactive TUI with file tree, search bar, and struct display" width="95%"></p>
 
-JSON output for tooling:
+</td>
+<td width="50%">
+<h3 align="center">bb-consts-tui</h3>
+<p align="center"><sub>Interactive constant browser</sub></p>
 
-```
-bb-types --struct PROCESS_BASIC_INFORMATION --json
-```
+<!-- TODO: Add a screenshot of the bb-consts-tui application in action -->
+<!-- Save to: media/bb-consts-tui.png -->
+<p align="center"><img src="./media/bb-consts-tui.png" alt="bb-consts-tui showing an interactive TUI with file tree, search bar, and constant display" width="95%"></p>
 
-Use PHNT (Process Hacker NT headers) instead of the stock SDK -- the entire
-header is embedded in the binary, no extra files needed:
+</td>
+</tr>
+</table>
 
-```
-bb-types --phnt --struct *OBJECT* --depth 1
-```
-
-Target a different architecture from your host:
-
-```
-bb-types --arch arm64 --struct CONTEXT
-```
-
-Kernel mode:
-
-```
-bb-types --mode kernel --struct DRIVER_OBJECT
-```
-
----
-
-## bb-consts
-
-Same idea, but for constants. Parses enums, `const`/`constexpr` variables, and
-`#define` macros. Composite macros (ones built from other named constants) get
-their components resolved and displayed inline.
-
-```
-bb-consts --name GENERIC_*
-```
-
-<!-- TODO: paste real output here -->
-
-Scope to an enum with `::` syntax:
-
-```
-bb-consts --name "FILE_INFORMATION_CLASS::*Ea*"
-```
-
-Or use `--enum` directly:
-
-```
-bb-consts --enum FILE_INFORMATION_CLASS
-```
-
-PHNT constants:
-
-```
-bb-consts --phnt --name "STATUS_*"
-```
-
-JSON:
-
-```
-bb-consts --enum FILE_INFORMATION_CLASS --json
-```
+<br>
 
 ---
 
-## Supported headers
+## What is this?
 
-Both tools accept `--winsdk` (default) or `--phnt` as the header source.
+Windows ships with thousands of C/C++ headers (the **Windows SDK**) that define every struct, enum, constant, and macro the OS exposes. Separately, the community-maintained **PHNT** (Process Hacker NT headers) documents internal structures that Microsoft doesn't publish.
 
-**Windows SDK** -- uses whatever version is available in your Developer Command
-Prompt environment. Covers user-mode (`windows.h`, `winternl.h`, `dbghelp.h`,
-crypto, networking, shell, COM, etc.) and kernel-mode (`ntddk.h`, `wdm.h`,
-`ntifs.h`, `fltkernel.h`, etc.) headers.
+`bb` parses these headers with **libclang** and gives you fast, searchable, pretty-printed access to all of it **(hell, even TUIs!)** — no debugger, no IDE, no digging through `.h` files by hand.
 
-**PHNT** -- the Process Hacker NT headers, embedded at compile time. Exposes
-internal NT structures and constants that the public SDK doesn't ship. Supports
-version targeting from Win2000 through Win11 22H2:
+<table>
+<tr></tr>
+<tr>
+<td>
 
-```
-bb-types --phnt win11 --struct *PROCESS*
-bb-types --phnt vista --struct PEB
-```
+**You might want this if you...**
+
+- Reverse-engineer Windows internals;
+- Write kernel drivers or need to check struct layouts across architectures;
+- Want a quick `dt`-style lookup without spinning up WinDbg;
+- Need to export struct/constant definitions as JSON for your own tooling;
+- Are just curious about what's inside those headers!
+
+</td>
+</tr>
+</table>
 
 ---
 
-## Building
+## Quick start
 
-You need:
+### Building
 
-- Rust (edition 2024)
-- LLVM / libclang (the `clang` crate needs it)
-- A Visual Studio Developer Command Prompt (for SDK include paths)
+You need a **Visual Studio Developer Command Prompt** (for SDK include paths), **Rust** (edition 2024), and **LLVM / libclang**.
 
 ```
 cargo build --release
 ```
 
-The binaries land in `target/release/bb-types.exe` and `target/release/bb-consts.exe`.
+The binaries land in `target/release/`.
+
+### First commands
+
+**Inspect a struct layout:**
+
+```
+bb-types --struct PROCESS_BASIC_INFORMATION
+```
+
+**Recurse into nested types:**
+
+```
+bb-types --phnt --struct PEB --depth 1
+```
+
+**Search for constants by wildcard:**
+
+```
+bb-consts --name GENERIC_*
+```
+
+**Scope to a specific enum:**
+
+```
+bb-consts --enum FILE_INFORMATION_CLASS
+```
+
+**Use `Enum::Constant` syntax to search within enums:**
+
+```
+bb-consts --name "FILE_INFORMATION_CLASS::*Ea*"
+```
+
+**Target a different architecture from your host:**
+
+```
+bb-types --arch arm64 --struct CONTEXT
+```
+
+**Export as JSON for your own tooling:**
+
+```
+bb-types --struct PROCESS_BASIC_INFORMATION --json
+```
+
+---
+
+## The tools
+
+<table>
+<tr></tr>
+<tr>
+<td width="50%" valign="top">
+
+### CLI applications
+
+|   | Crate | What it does |
+| --- | --- | --- |
+| | [`bb-types`](bb-types/) | Inspect struct and class layouts |
+| | [`bb-consts`](bb-consts/) | Inspect constants, enums, and `#define` macros |
+
+</td>
+<td width="50%" valign="top">
+
+### TUI applications
+
+|   | Crate | What it does |
+| --- | --- | --- |
+| | [`bb-types-tui`](bb-types-tui/) | Interactive struct browser |
+| | [`bb-consts-tui`](bb-consts-tui/) | Interactive constant browser |
+
+</td>
+</tr>
+</table>
+
+<table>
+<tr></tr>
+<tr>
+<td width="33%" valign="top">
+
+### Libraries
+
+| Crate | What it does |
+| --- | --- |
+| [`bb-clang`](util/bb-clang/) | libclang abstractions for types and constants |
+| [`bb-sdk`](util/bb-sdk/) | Windows SDK / PHNT header management |
+| [`bb-cli`](util/bb-cli/) | Shared CLI argument definitions |
+| [`bb-tui`](util/bb-tui/) | Shared TUI framework on [`ratatui`](https://ratatui.rs/) |
+| [`bb-shared`](util/bb-shared/) | Small shared utilities |
+
+</td>
+</tr>
+</table>
+
+---
+
+## Supported headers
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+### Windows SDK
+
+Uses whatever version is available in your Developer Command Prompt environment.
+
+Covers **user-mode** headers (`windows.h`, `winternl.h`, `dbghelp.h`, crypto, networking, shell, COM, etc.) and **kernel-mode** headers (`ntddk.h`, `wdm.h`, `ntifs.h`, `fltkernel.h`, etc.)
+
+```
+bb-types --winsdk --struct DRIVER_OBJECT
+bb-types --mode kernel --struct EPROCESS
+```
+
+</td>
+<td width="50%" valign="top">
+
+### PHNT
+
+The **Process Hacker NT headers**, embedded at compile time. Exposes internal NT structures and constants that the public SDK doesn't ship.
+
+Supports version targeting from **Win2000** through **Win11 22H2**:
+
+```
+bb-types --phnt win11 --struct PEB
+bb-consts --phnt --name "STATUS_*"
+```
+
+</td>
+</tr>
+</table>
 
 ---
 
 ## Architecture support
 
-Both tools support cross-compilation via `--arch`:
+Both tools support cross-compilation via `--arch` -- inspect struct layouts for any target from any host:
 
-| Flag | Target triple | Notes |
-|---|---|---|
-| `amd64` (default) | `x86_64-pc-windows-msvc` | |
+| Flag | Target | Notes |
+| --- | --- | --- |
+| `amd64` | `x86_64-pc-windows-msvc` | Default |
 | `x86` | `i686-pc-windows-msvc` | |
 | `arm64` | `aarch64-pc-windows-msvc` | |
 | `arm` | `thumbv7-pc-windows-msvc` | |
 
-This means you can inspect ARM64 struct layouts from an x64 machine -- clang
-handles the cross-compilation defines and target triple internally.
+```
+bb-types --arch arm64 --struct CONTEXT
+```
 
 ---
 
 ## How it works
 
-Neither tool reads header files off disk directly. Instead, `bb-sdk` builds a
-synthetic `#include` cascade at runtime (covering the relevant subset of SDK or
-PHNT headers) and hands it to libclang as an in-memory buffer. The parsed AST
-is then walked by `bb-clang` to extract typed representations of structs,
-fields, enums, and constants.
+Neither tool reads header files off disk directly. Instead, `bb-sdk` builds a synthetic `#include` cascade at runtime (covering the relevant subset of SDK or PHNT headers) and hands it to **libclang** as an in-memory buffer. The parsed AST is then walked by `bb-clang` to extract typed representations of structs, fields, enums, and constants.
 
-For macros specifically, `bb-consts` does a two-pass resolution: first pass
-evaluates simple literals and variables, second pass substitutes known constant
-names into unresolved macro token streams before re-evaluating. This handles
-things like `#define GENERIC_ALL (GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE)`.
+For macros specifically, `bb-consts` does a two-pass resolution: first pass evaluates simple literals and variables, second pass substitutes known constant names into unresolved macro token streams before re-evaluating. This handles things like `#define GENERIC_ALL (GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE)`.
 
----
-
-## Project structure
+<table>
+<tr></tr>
+<tr>
+<td>
 
 ```
-bb/
-  bb-types/          cli: struct inspection
-  bb-consts/         cli: constant inspection
-  util/
-    bb-clang/        libclang type abstractions + display rendering
-    bb-sdk/          SDK/PHNT header management + clang argument generation
-    bb-shared/       glob matching, small utilities
+                  ┌──────────┐
+                  │  bb-sdk  │  Discovers SDK, builds synthetic headers
+                  └────┬─────┘
+                       │
+                       ▼
+                  ┌──────────┐
+                  │ bb-clang │  Parses AST, extracts structured entities
+                  └────┬─────┘
+                       │
+              ┌────────┴────────┐
+             ▼                 ▼
+        ┌──────────┐     ┌───────────┐
+        │ bb-types │     │ bb-consts │      CLI frontends
+        └──────────┘     └───────────┘
+              │                 │
+             ▼                 ▼
+       ┌──────────────┐  ┌───────────────┐
+       │ bb-types-tui │  │ bb-consts-tui │  TUI frontends
+       └──────────────┘  └───────────────┘
 ```
 
-## License
-
-<!-- TODO -->
+</td>
+</tr>
+</table>

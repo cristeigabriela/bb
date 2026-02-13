@@ -28,24 +28,24 @@ struct Args {
     filter: Option<String>,
 
     #[arg(
-        short,
+        short = 's',
         long = "struct",
         help = "Struct name pattern (supports * wildcard)"
     )]
     struct_name: Option<String>,
 
     #[arg(
-        short,
+        short = 'f',
         long = "field",
         help = "Field name pattern (supports * wildcard)"
     )]
     field_name: Option<String>,
 
-    #[arg(short, long = "case-sensitive", help = "Case-sensitive matching")]
+    #[arg(short = 'c', long = "case-sensitive", help = "Case-sensitive matching")]
     case_sensitive: bool,
 
     #[arg(
-        short,
+        short = 'd',
         long = "depth",
         default_value = "0",
         help = "Recursion depth for nested types"

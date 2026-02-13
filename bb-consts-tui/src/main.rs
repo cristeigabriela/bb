@@ -55,7 +55,7 @@ fn main() -> Result<()> {
     let index = Index::new(&clang_instance, false, args.shared.diagnostics);
 
     // Parse headers.
-    let tu = config.parse(&index, false)?;
+    let tu = config.parse(&index, true)?;
 
     let (enum_from_name, const_pattern) = parse_name_pattern(args.name.as_deref());
 

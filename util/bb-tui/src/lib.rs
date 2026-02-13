@@ -29,7 +29,7 @@ pub enum Focus {
     Search,
 }
 
-/* ──────────────── FileEntry -- the entries in the file tree ─────────────── */
+/* ──────────────── FileEntry — the entries in the file tree ─────────────── */
 
 /// An entry in the file tree.
 pub struct FileEntry {
@@ -37,7 +37,7 @@ pub struct FileEntry {
     pub count: usize,
 }
 
-/* ──── TuiData -- the trait that needs to be implemented to display data ─── */
+/* ──── TuiData — the trait that needs to be implemented to display data ─── */
 
 /// Domain-specific data source for the TUI.
 pub trait TuiData {
@@ -55,7 +55,7 @@ pub trait TuiData {
     fn rebuild_rows(&mut self, search: Option<&str>, file_filter: Option<&str>);
 }
 
-/* ──────────────────── App -- the basic state of the UI ──────────────────── */
+/* ──────────────────── App — the basic state of the UI ──────────────────── */
 
 pub struct App<D> {
     pub focus: Focus,
