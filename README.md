@@ -141,7 +141,10 @@ bb-types --arch arm64 --struct _CONTEXT
 
 ```bash
 bb-types --arch arm64 --struct _CONTEXT --json
+bb-consts --name "PROCESS_*" --json
 ```
+
+JSON mode in `bb-types` performs full nested type expansion, producing all matched types alongside their deduplicated `referenced_types` — regardless of the `--depth` flag.
 
 **Typo? Both CLIs suggest close matches:**
 

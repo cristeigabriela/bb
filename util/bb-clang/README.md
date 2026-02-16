@@ -23,6 +23,7 @@ The purpose is to take in the entity object, and lift it to a structured represe
 - **[`Constant`](./src/constant/mod.rs)** -- A generic representation of all constants (variable declarations that evaluate at compile-time; enum constant declarations; simple, non-builtin macro definitions). We only support (and expose) numeric ones.
   We evaluate the value of the macro after getting the tokens that make it up from Clang, and turning them into [`cexpr`](https://crates.io/crates/cexpr) tokens to evaluate them as a macro definition.
   Moreover, we also support decomposing more complex macros into body tokens that will later be used in conjunction with [`cexpr`](https://crates.io/crates/cexpr) to parse the individual tokens that make it up, to understand how the value came to be.
+  Macro constants resolved via lookup also track their **components** — the names of other constants that were substituted during evaluation (e.g., `FILE_ALL_ACCESS` tracks `STANDARD_RIGHTS_REQUIRED`, `SYNCHRONIZE`, etc.).
 
 > **Note** — This is always subject to change, please make sure that you create your own understanding by reading the source code.
 
@@ -30,7 +31,7 @@ The purpose is to take in the entity object, and lift it to a structured represe
 
 We also offer:
 
-- **[`SourceLocation`](./src/location.rs)** -- A simple abstraction over source locations.
+- **[`SourceLocation`](./src/location.rs)** -- A simple abstraction over source locations. Carries both the **filename** (used in serialization) and the **full path** (available via `path()` for programmatic use, skipped during serialization).
 
 - **[`Traits`](./src/traits.rs)** -- Some extensions over clang-rs that made the experience personally better for me, but they may be a bit opinionated.
 
@@ -43,6 +44,15 @@ We also offer:
 Almost every type exposed is serializable, for the purpose of turning the information into easily distributable data.
 
 A core belief of `bb` is that it is meant to help others not only view the data, but interact with it, and extract it. You may build your own tooling from joining these utilities together through the frontend CLIs (with the `--json` flag.)
+
+#### `ToJson` trait
+
+The **[`ToJson`](./src/json.rs)** trait provides structured JSON serialization for all bb-clang types (`Constant`, `Enum`, `Field`, `Struct`), with implementations for individual values, slices, and `Vec`s.
+
+It exposes two methods:
+
+- **`to_json()`** — basic JSON serialization. For structs, this injects a `referenced_types` key containing the names of nested types.
+- **`to_json_full()`** — full JSON serialization with maximum detail. For a single `Struct`, this returns `{ "type": {..}, "referenced_types": [{..}, ..] }` with all nested types fully expanded and deduplicated. For a slice of structs, it returns `{ "types": [...], "referenced_types": [...] }` with all nested types across the slice expanded and deduplicated. For non-struct types, this is identical to `to_json()`.
 
 ### Pretty displays
 

@@ -17,7 +17,7 @@
 | `--depth` / `-d` | Depth of inline field type expansion |
 | `--filter` / `-H` | Filter your searches to a specific header |
 | `--case-sensitive` / `-c` | Case-sensitive matching |
-| `--json` | Output as a JSON array of types (plus extra information) |
+| `--json` | Output as JSON with full nested type expansion (ignores `--depth`) |
 
 ---
 
