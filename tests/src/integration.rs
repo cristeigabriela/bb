@@ -17,7 +17,7 @@ mod tests {
     /// 2. No-diagnostics index
     /// 3. Translation unit
     ///
-    /// By default takes 3 arguments and defaults to user-mode AMD64 Windows SDk,
+    /// By default takes 3 arguments and defaults to user-mode AMD64 Windows `SDk`,
     /// but you can substitute those two using the extra arguments.
     macro_rules! winsdk {
         ($clang:ident, $index:ident, $tu:ident) => {
@@ -75,7 +75,7 @@ mod tests {
         let guid = structs
             .into_iter()
             .next()
-            .ok_or(anyhow::anyhow!("GUID struct must exist in Windows SDK"))?;
+            .ok_or_else(|| anyhow::anyhow!("GUID struct must exist in Windows SDK"))?;
 
         assert_eq!(guid.get_size(), Some(16), "GUID is always 16 bytes");
         assert_eq!(guid.get_fields().len(), 4, "GUID has exactly 4 fields");
@@ -83,7 +83,7 @@ mod tests {
         // Location: should be in guiddef.h
         let location = guid
             .get_location()
-            .ok_or(anyhow::anyhow!("GUID should have a source location"))?;
+            .ok_or_else(|| anyhow::anyhow!("GUID should have a source location"))?;
         assert_eq!(
             location.file.as_ref().map(|x| x.to_lowercase()),
             Some("guiddef.h".into())
@@ -165,7 +165,7 @@ mod tests {
         // Location: should be in guiddef.h
         let location = filetime
             .get_location()
-            .ok_or(anyhow::anyhow!("FILETIME should have a source location"))?;
+            .ok_or_else(|| anyhow::anyhow!("FILETIME should have a source location"))?;
         assert_eq!(
             location.file.as_ref().map(|x| x.to_lowercase()),
             Some("minwindef.h".into())
@@ -546,13 +546,11 @@ mod tests {
             let components = faa.get_components();
             assert!(
                 components.iter().any(|n| n == "STANDARD_RIGHTS_REQUIRED"),
-                "FILE_ALL_ACCESS should reference STANDARD_RIGHTS_REQUIRED, got: {:?}",
-                components
+                "FILE_ALL_ACCESS should reference STANDARD_RIGHTS_REQUIRED, got: {components:?}"
             );
             assert!(
                 components.iter().any(|n| n == "SYNCHRONIZE"),
-                "FILE_ALL_ACCESS should reference SYNCHRONIZE, got: {:?}",
-                components
+                "FILE_ALL_ACCESS should reference SYNCHRONIZE, got: {components:?}"
             );
         }
 
@@ -646,7 +644,7 @@ mod tests {
         let guid = structs
             .into_iter()
             .next()
-            .ok_or(anyhow::anyhow!("GUID must exist"))?;
+            .ok_or_else(|| anyhow::anyhow!("GUID must exist"))?;
 
         let j = guid.to_json();
         assert_eq!(j["name"], "_GUID");
@@ -713,15 +711,15 @@ mod tests {
         let guid = structs
             .into_iter()
             .next()
-            .ok_or(anyhow::anyhow!("GUID must exist"))?;
+            .ok_or_else(|| anyhow::anyhow!("GUID must exist"))?;
 
         let loc = guid
             .get_location()
-            .ok_or(anyhow::anyhow!("GUID should have a location"))?;
+            .ok_or_else(|| anyhow::anyhow!("GUID should have a location"))?;
 
         // file should be just the filename
         assert_eq!(
-            loc.file.as_deref().map(|f| f.to_lowercase()),
+            loc.file.as_deref().map(str::to_lowercase),
             Some("guiddef.h".into())
         );
 

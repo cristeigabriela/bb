@@ -78,7 +78,6 @@ impl ToJson for Struct<'_> {
     }
 }
 
-
 impl<T: ToJson> ToJson for &T {
     fn to_json(&self) -> Value {
         (*self).to_json()
