@@ -10,3 +10,4 @@ thiserror.workspace = true
 serde.workspace = true
 colored.workspace = true
 cexpr.workspace = true
+serde_json.workspace = true

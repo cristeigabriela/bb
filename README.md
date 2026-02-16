@@ -268,7 +268,7 @@ The flow is described below:
 <p align="center"><img src="./media/bb-diagram.png" alt="Diagram showing the bb crate dependency flow: bb-sdk feeds into bb-clang, which branches into bb-types and bb-consts (CLI frontends), each flowing down to bb-types-tui and bb-consts-tui (TUI frontends)" width="75%"></p>
 
 
-We use `bb-sdk` to collect Windows SDK specific data, then we generate a SDK-specific "synthetic header" (also known as an `Unsaved`/`CXUnsavedFile` in the Clang-world) which will be passed through partial compilation with `libclang.dll` and in turn give us a `TranslationUnit`.
+We use `bb-sdk` to discover (or gather) the SDK environment, then we generate a SDK-specific "synthetic header" (also known as an `Unsaved`/`CXUnsavedFile` in the Clang-world) which will be passed through partial compilation with `libclang.dll` and in turn give us a `TranslationUnit`.
 
 From the translation unit, we lift the AST entities into `bb-clang` serializable objects, and we use the information that we expose there to develop the tools.
 

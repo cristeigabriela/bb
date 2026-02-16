@@ -1,9 +1,10 @@
 use anyhow::Result;
-use bb_clang::Struct;
+use bb_clang::{Struct, ToJson};
 use bb_cli::{get_header_config, print_suggestions};
 use bb_types_lib::{StructFilter, collect_structs, iter_structs};
 use clang::{Clang, Index};
 use clap::Parser;
+use serde_json::Value;
 
 /* ─────────────────────────────────── CLI ────────────────────────────────── */
 
@@ -84,7 +85,7 @@ fn main() -> Result<()> {
     }
 
     if args.json {
-        print_json(structs.as_slice(), args.depth)?;
+        print_json(structs.as_slice())?;
     } else {
         print_display(structs.as_slice(), args.depth, &args.field_name);
     }
@@ -107,44 +108,17 @@ fn print_display(structs: &[Struct], depth: usize, field_name: &Option<String>) 
     }
 }
 
-/// Print JSON with a flat `types` array.
+/// Print JSON with `types` and `referenced_types` arrays.
 ///
-/// Each type entry includes `referenced_types` listing the names of expandable
-/// child types. When `depth > 0`, those referenced types are also present as
-/// entries in the same array, so the consumer can look them up by name.
-fn print_json(structs: &[Struct], depth: usize) -> anyhow::Result<()> {
-    use std::collections::HashSet;
-
-    let mut all_types: Vec<serde_json::Value> = Vec::new();
-    let mut seen = HashSet::new();
-
-    // Helper: serialize a Struct and append its referenced_types names.
-    let to_json = |s: &Struct| -> anyhow::Result<serde_json::Value> {
-        let mut val = serde_json::to_value(s)?;
-        val.as_object_mut().unwrap().insert(
-            "referenced_types".to_string(),
-            serde_json::to_value(s.referenced_type_names())?,
-        );
-        Ok(val)
-    };
-
-    // Queried types first.
-    for s in structs {
-        seen.insert(s.get_name().to_string());
-        all_types.push(to_json(s)?);
-    }
-
-    // Expand nested types up to depth.
-    for s in structs {
-        for nested in s.extract_nested_types(depth) {
-            if seen.insert(nested.get_name().to_string()) {
-                all_types.push(to_json(&nested)?);
-            }
-        }
-    }
-
+/// Uses [`ToJson::to_json_full`] on the struct slice to produce all matched
+/// types and their nested referenced types, fully expanded and deduplicated.
+fn print_json(structs: &[Struct]) -> anyhow::Result<()> {
     let command = std::env::args().collect::<Vec<_>>().join(" ");
-    let output = serde_json::json!({ "command": command, "types": all_types });
+    let mut output = structs.to_json_full();
+    output
+        .as_object_mut()
+        .unwrap()
+        .insert("command".to_string(), Value::String(command));
     println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())
 }

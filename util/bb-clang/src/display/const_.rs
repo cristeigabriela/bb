@@ -4,7 +4,7 @@ use std::fmt::Write;
 
 use colored::Colorize;
 
-use crate::constant::{ConstLookup, Constant, MacroBodyToken};
+use crate::constant::{ConstLookup, Constant, MacroBodyToken, StripOuterParens};
 use crate::enum_::Enum;
 
 /// Format macro body tokens as a colored composition string.
@@ -18,18 +18,12 @@ use crate::enum_::Enum;
 /// - Resolved values: yellow (matching offsets/values)
 /// - Operators/punctuation: dimmed
 /// - Unresolved literals: yellow
-fn format_composition(tokens: &[MacroBodyToken], lookup: &ConstLookup) -> Option<String> {
-    let has_resolvable = tokens.iter().any(
-        |MacroBodyToken {
-             is_identifier,
-             lit_representation,
-         }| *is_identifier && lookup.contains_key(lit_representation),
-    );
-    if !has_resolvable {
+fn format_composition(c: &Constant, lookup: &ConstLookup) -> Option<String> {
+    if c.get_components().is_empty() {
         return None;
     }
 
-    let tokens = strip_outer_parens(tokens);
+    let tokens = c.get_body_tokens().strip_outer_parens();
 
     let mut parts = Vec::new();
     for MacroBodyToken {
@@ -57,20 +51,6 @@ fn format_composition(tokens: &[MacroBodyToken], lookup: &ConstLookup) -> Option
     }
 
     Some(parts.join(" "))
-}
-
-/// Strip matching outer parentheses from a token slice.
-fn strip_outer_parens(tokens: &[MacroBodyToken]) -> &[MacroBodyToken] {
-    if tokens.len() >= 2
-        && !tokens[0].is_identifier
-        && tokens[0].lit_representation == "("
-        && !tokens[tokens.len() - 1].is_identifier
-        && tokens[tokens.len() - 1].lit_representation == ")"
-    {
-        &tokens[1..tokens.len() - 1]
-    } else {
-        tokens
-    }
 }
 
 /// Render a slice of constants as a tree.
@@ -124,7 +104,7 @@ pub fn render_constants(
         let name_padded = format!("{:<width$}", c.get_name(), width = max_name);
         let value_str = c.get_value().to_string();
 
-        let composition = lookup.and_then(|l| format_composition(c.get_body_tokens(), l));
+        let composition = lookup.and_then(|l| format_composition(c, l));
 
         if nested {
             let _ = write!(

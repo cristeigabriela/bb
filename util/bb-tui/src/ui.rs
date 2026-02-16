@@ -29,10 +29,7 @@ pub fn draw<D: TuiData>(frame: &mut Frame, app: &App<D>) {
     if app.focus == Focus::Search {
         // Count the display width (chars) up to the byte cursor.
         let display_offset = app.search[..app.cursor].chars().count() as u16;
-        frame.set_cursor_position((
-            search_area.x + 1 + display_offset,
-            search_area.y + 1,
-        ));
+        frame.set_cursor_position((search_area.x + 1 + display_offset, search_area.y + 1));
     }
 }
 

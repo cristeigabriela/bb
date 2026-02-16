@@ -72,7 +72,10 @@ pub fn run<D: TuiData>(app: &mut App<D>) -> Result<()> {
                 }
                 KeyCode::Right => {
                     if app.cursor < app.search.len() {
-                        app.cursor += app.search[app.cursor..].chars().next().map_or(0, char::len_utf8);
+                        app.cursor += app.search[app.cursor..]
+                            .chars()
+                            .next()
+                            .map_or(0, char::len_utf8);
                     }
                 }
                 KeyCode::Home => {

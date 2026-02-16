@@ -81,7 +81,7 @@ impl<'a> Constant<'a> {
             // I wish there was a way to take the source-range and analyze everything
             // as the underlying AST entities so that I could filter all CStyleCastExpr's
             // but... there is no way afaik. so we do it the hacky way. :c
-            //
+
             // Strip C-style cast patterns: `( TYPE )` where TYPE is one or more
             // identifier/keyword tokens and none of the identifiers are known
             // constants. This handles macros like:
@@ -132,6 +132,12 @@ impl<'a> Constant<'a> {
         let value = ConstValue::from_cexpr(result).ok_or(ConstantError::NotEvaluable)?;
         let location = SourceLocation::from_entity(&entity);
 
+        let components: Vec<String> = body_tokens
+            .iter()
+            .filter(|t| t.is_identifier && lookup.contains_key(&t.lit_representation))
+            .map(|t| t.lit_representation.clone())
+            .collect();
+
         Ok(Self::new(
             entity,
             name,
@@ -139,6 +145,7 @@ impl<'a> Constant<'a> {
             type_name,
             location,
             body_tokens,
+            components,
         ))
     }
 }

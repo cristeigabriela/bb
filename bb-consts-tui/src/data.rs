@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use bb_clang::{ConstLookup, Constant, Enum, MacroBodyToken};
+use bb_clang::{ConstLookup, Constant, Enum, StripOuterParens};
 use bb_shared::glob_match;
 use bb_tui::{FileEntry, TuiData, matches_file};
 use ratatui::style::{Color, Modifier, Style};
@@ -47,11 +47,7 @@ impl<'a> ConstData<'a> {
     }
 
     fn has_composition(&self, c: &Constant) -> bool {
-        let tokens = c.get_body_tokens();
-        !tokens.is_empty()
-            && tokens
-                .iter()
-                .any(|t| t.is_identifier && self.lookup.contains_key(&t.lit_representation))
+        !c.get_components().is_empty()
     }
 }
 
@@ -290,7 +286,7 @@ fn render_composition(
         ),
     ];
 
-    let tokens = strip_outer_parens(c.get_body_tokens());
+    let tokens = c.get_body_tokens().strip_outer_parens();
 
     for token in tokens {
         if token.is_identifier {
@@ -327,19 +323,6 @@ fn render_composition(
     }
 
     Line::from(spans)
-}
-
-fn strip_outer_parens(tokens: &[MacroBodyToken]) -> &[MacroBodyToken] {
-    if tokens.len() >= 2
-        && !tokens[0].is_identifier
-        && tokens[0].lit_representation == "("
-        && !tokens[tokens.len() - 1].is_identifier
-        && tokens[tokens.len() - 1].lit_representation == ")"
-    {
-        &tokens[1..tokens.len() - 1]
-    } else {
-        tokens
-    }
 }
 
 /* ─────────────────────────────── File index ─────────────────────────────── */

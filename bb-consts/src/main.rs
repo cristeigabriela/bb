@@ -1,5 +1,5 @@
 use anyhow::Result;
-use bb_clang::{ConstLookup, Constant, Enum, render_constants};
+use bb_clang::{ConstLookup, Constant, Enum, ToJson, render_constants};
 use bb_cli::{get_header_config, print_suggestions};
 use bb_consts_lib::{
     ConstFilter, build_lookup_table, collect_constants, collect_enums, filter_constants_by_name,
@@ -100,18 +100,13 @@ fn main() -> Result<()> {
                 .any(|c| glob_match(c.get_name(), pat, filter.case_sensitive))
         });
         if vars.is_empty() && !has_enum_hit {
-            print_suggestions(
-                "constants",
-                Some(pat),
-                known.keys().map(String::as_str),
-            );
+            print_suggestions("constants", Some(pat), known.keys().map(String::as_str));
         }
     }
 
     // Suggest close enum names when nothing matched the enum pattern.
     if enums.is_empty() && filter.enum_pattern.is_some() {
-        let enum_names: Vec<String> =
-            iter_enums(&tu).filter_map(|e| e.get_name()).collect();
+        let enum_names: Vec<String> = iter_enums(&tu).filter_map(|e| e.get_name()).collect();
         print_suggestions(
             "enums",
             filter.enum_pattern.as_deref(),
@@ -147,13 +142,6 @@ fn print_display(enums: &[Enum], vars: &[Constant], filter: &ConstFilter, lookup
 /// Collect enums, their contents, and non-scoped constants (vars, macros, ...) into a JSON,
 /// and pretty-print it.
 fn print_json(enums: &[Enum], vars: &[Constant], filter: &ConstFilter) -> Result<()> {
-    #[derive(serde::Serialize)]
-    struct Output<'a> {
-        command: String,
-        enums: Vec<&'a Enum<'a>>,
-        constants: Vec<&'a Constant<'a>>,
-    }
-
     let filtered_enums: Vec<&Enum> = enums
         .iter()
         .filter(|e| {
@@ -165,11 +153,12 @@ fn print_json(enums: &[Enum], vars: &[Constant], filter: &ConstFilter) -> Result
         })
         .collect();
 
-    let output = Output {
-        command: std::env::args().collect::<Vec<_>>().join(" "),
-        enums: filtered_enums,
-        constants: vars.iter().collect(),
-    };
+    let command = std::env::args().collect::<Vec<_>>().join(" ");
+    let output = serde_json::json!({
+        "command": command,
+        "enums": filtered_enums.to_json(),
+        "constants": vars.to_json(),
+    });
 
     println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())

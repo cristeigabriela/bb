@@ -52,6 +52,11 @@ pub struct Constant<'a> {
     /// Raw macro body tokens (identifier flag + spelling). Empty for non-macros.
     #[serde(skip)]
     body_tokens: Vec<MacroBodyToken>,
+    /// Names of other constants this macro is composed of.
+    /// Populated automatically for macros built via
+    /// [`try_from_macro_with_lookup`](Self::try_from_macro_with_lookup).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    components: Vec<String>,
 }
 
 impl<'a> Constant<'a> {
@@ -63,6 +68,7 @@ impl<'a> Constant<'a> {
         type_name: Option<String>,
         location: Option<SourceLocation>,
         body_tokens: Vec<MacroBodyToken>,
+        components: Vec<String>,
     ) -> Self {
         let hex = value.to_string();
         Self {
@@ -73,6 +79,7 @@ impl<'a> Constant<'a> {
             type_name,
             location,
             body_tokens,
+            components,
         }
     }
 
@@ -120,6 +127,15 @@ impl<'a> Constant<'a> {
     #[must_use]
     pub fn get_body_tokens(&self) -> &[MacroBodyToken] {
         &self.body_tokens
+    }
+
+    /// Names of other constants this macro is composed of.
+    ///
+    /// Populated automatically for macros built via
+    /// [`try_from_macro_with_lookup`](Self::try_from_macro_with_lookup).
+    #[must_use]
+    pub fn get_components(&self) -> &[String] {
+        &self.components
     }
 }
 
@@ -180,6 +196,7 @@ impl<'a> TryFrom<Entity<'a>> for Constant<'a> {
             type_name,
             location,
             body_tokens,
+            components: Vec::new(),
         })
     }
 }
@@ -196,4 +213,26 @@ fn extract_body_tokens(tokens: &[Token]) -> Vec<MacroBodyToken> {
             lit_representation: t.get_spelling(),
         })
         .collect()
+}
+
+/* ───────────────────────────── Type utilities ───────────────────────────── */
+
+/// Strip matching outer parentheses from a macro body token slice.
+pub trait StripOuterParens {
+    fn strip_outer_parens(&self) -> &[MacroBodyToken];
+}
+
+impl StripOuterParens for [MacroBodyToken] {
+    fn strip_outer_parens(&self) -> &[MacroBodyToken] {
+        if self.len() >= 2
+            && !self[0].is_identifier
+            && self[0].lit_representation == "("
+            && !self[self.len() - 1].is_identifier
+            && self[self.len() - 1].lit_representation == ")"
+        {
+            &self[1..self.len() - 1]
+        } else {
+            self
+        }
+    }
 }

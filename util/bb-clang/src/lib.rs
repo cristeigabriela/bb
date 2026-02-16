@@ -9,15 +9,17 @@ pub(crate) mod display;
 mod enum_;
 mod error;
 mod field;
+mod json;
 pub(crate) mod location;
 mod struct_;
 pub mod traits;
 
-pub use constant::{ConstLookup, ConstValue, Constant, MacroBodyToken};
+pub use constant::{ConstLookup, ConstValue, Constant, MacroBodyToken, StripOuterParens};
 pub use display::render_constants;
 pub use enum_::Enum;
 pub use error::{ConstantError, EnumError, FieldError, StructError};
 pub use field::Field;
+pub use json::ToJson;
 pub use location::SourceLocation;
 pub use struct_::Struct;
 

@@ -22,3 +22,6 @@ anyhow.workspace = true
 serde_json.workspace = true
 colored.workspace = true
 serde.workspace = true
+
+[dev-dependencies]
+serial_test.workspace = true
