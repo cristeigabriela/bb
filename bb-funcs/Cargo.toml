@@ -1,0 +1,28 @@
+[package]
+name = "bb-funcs"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "bb-funcs"
+path = "src/main.rs"
+
+[lib]
+name = "bb_funcs_lib"
+path = "src/lib.rs"
+
+[dependencies]
+bb-sdk.workspace = true
+bb-clang.workspace = true
+bb-shared.workspace = true
+bb-cli.workspace = true
+clang.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+serde_json.workspace = true
+colored.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+serial_test.workspace = true
+
