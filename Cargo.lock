@@ -151,6 +151,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "bb-funcs"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bb-clang",
+ "bb-cli",
+ "bb-sdk",
+ "bb-shared",
+ "clang",
+ "clap",
+ "colored",
+ "serde",
+ "serde_json",
+ "serial_test",
+]
+
+[[package]]
 name = "bb-sdk"
 version = "0.1.0"
 dependencies = [

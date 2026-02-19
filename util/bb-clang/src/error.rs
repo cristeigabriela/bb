@@ -50,6 +50,22 @@ pub enum ConstantError {
 }
 
 #[derive(Debug, Error)]
+pub enum FunctionError {
+    #[error("Entity is not a function: {0:?}")]
+    NotFunction(EntityKind),
+}
+
+#[derive(Debug, Error)]
+pub enum ParamError {
+    #[error("Entity is not a function param: {0:?}")]
+    NotParam(EntityKind),
+    #[error("Entity does not have a semantic parent")]
+    NoSemanticParent,
+    #[error("Entity does not have a type")]
+    NoType,
+}
+
+#[derive(Debug, Error)]
 pub enum Error {
     #[error("Struct error: {0}")]
     Struct(#[from] StructError),
@@ -59,4 +75,8 @@ pub enum Error {
     Enum(#[from] EnumError),
     #[error("Constant error: {0}")]
     Constant(#[from] ConstantError),
+    #[error("Function error: {0}")]
+    Function(#[from] FunctionError),
+    #[error("Param error: {0}")]
+    Param(#[from] ParamError),
 }

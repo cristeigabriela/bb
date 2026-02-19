@@ -1,5 +1,5 @@
 [workspace]
-members = ["tests", "bb-types", "util/bb-clang", "util/bb-shared", "util/bb-sdk", "util/bb-cli", "util/bb-tui", "bb-consts", "bb-consts-tui", "bb-types-tui"]
+members = ["tests", "bb-types", "util/bb-clang", "util/bb-shared", "util/bb-sdk", "util/bb-cli", "util/bb-tui", "bb-consts", "bb-consts-tui", "bb-types-tui", "bb-funcs"]
 resolver = "3"
 
 [workspace.package]
