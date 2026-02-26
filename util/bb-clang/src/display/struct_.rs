@@ -5,9 +5,9 @@ use colored::Colorize;
 use std::collections::HashSet;
 use std::fmt::Write;
 
-use crate::field::Field;
+use crate::clang_ext::DeclarationKind;
+use crate::struct_::Field;
 use crate::struct_::Struct;
-use crate::traits::DeclarationKind;
 
 /// Renders a struct in `WinDbg` `dt`-style format with Unicode box-drawing.
 ///

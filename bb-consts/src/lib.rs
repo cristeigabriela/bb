@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-use bb_clang::{ConstLookup, Constant, Enum};
+use bb_clang::{build_tu_entity_map, ConstLookup, Constant, Enum};
 use bb_shared::glob_match;
 use clang::{Entity, EntityKind, TranslationUnit};
 
@@ -103,49 +103,43 @@ pub fn collect_enums<'a>(tu: &'a TranslationUnit<'a>, filter: &ConstFilter) -> V
         .collect()
 }
 
-/// Two-pass constant collection over [`TranslationUnit`].
+/// Collect and recursively resolve constants from a [`TranslationUnit`].
 ///
-/// Returns directly-evaluated constants and failed macro entities (for later
-/// resolution with a lookup).
-///
-/// Only header-filters during collection. Name filtering is intentionally
+/// Applies the header filter during collection. Name filtering is intentionally
 /// deferred so that the lookup table built from these results contains every
-/// constant needed for cross-reference substitution (e.g. `#define FOO BAR`
-/// where `BAR` wouldn't match the caller's name pattern).
+/// constant needed for cross-reference resolution.
 ///
-/// Use [`filter_constants_by_name`] after macro resolution to apply the name
-/// pattern.
+/// Use [`filter_constants_by_name`] after this call to apply the name pattern.
 #[must_use]
 pub fn collect_constants<'a>(
     tu: &'a TranslationUnit<'a>,
     filter: &ConstFilter,
-) -> (Vec<Constant<'a>>, Vec<Entity<'a>>) {
+) -> Vec<Constant<'a>> {
     if filter.scoped_to_enum {
-        return (Vec::new(), Vec::new());
+        return Vec::new();
     }
 
-    let entities: Vec<_> = iter_constants(tu)
+    // Instead of building the translation unit entity map for every single
+    // macro, build it once.
+    let tu_map = build_tu_entity_map(tu);
+
+    iter_constants(tu)
         .filter(|e| filter.matches_header(e))
-        .collect();
-
-    let mut vars = Vec::new();
-    let mut failed = Vec::new();
-
-    for e in entities {
-        match Constant::try_from(e) {
-            Ok(c) => vars.push(c),
-            Err(_) if e.get_kind() == EntityKind::MacroDefinition => failed.push(e),
-            Err(_) => {}
-        }
-    }
-
-    (vars, failed)
+        .filter_map(|e| {
+            // If you fail building a "regular" constant, it might have references
+            // preventing you from directly evaluating it. So, try and check if
+            // attempting to resolve possible references fixes it.
+            Constant::try_from(e)
+                .or_else(|_| Constant::try_from_macro_with_map(e, &tu_map))
+                .ok()
+        })
+        .collect()
 }
 
 /// Filter constants by the name pattern in the given filter.
 ///
-/// Call this **after** macro resolution so that every constant had a chance
-/// to be resolved against the full lookup table.
+/// Call this **after** constant collection so that every constant had a chance
+/// to be resolved against the full TU entity map.
 #[must_use]
 pub fn filter_constants_by_name<'a>(
     constants: Vec<Constant<'a>>,
@@ -178,10 +172,10 @@ pub fn iter_constants<'a>(tu: &'a TranslationUnit<'a>) -> impl Iterator<Item = E
     })
 }
 
-/* ────────────────────────────── Macros lookup ───────────────────────────── */
+/* ───────────────────────────── Display lookup ───────────────────────────── */
 
-/// Build a name -> value lookup table from all known constants (macros and vars).
-#[must_use]
+/// Build a name -> value lookup table from all known constants (used for
+/// display-time composition rendering).
 pub fn build_lookup_table(enums: &[Enum], vars: &[Constant]) -> ConstLookup {
     let mut known = HashMap::new();
     for e in enums {
@@ -193,18 +187,4 @@ pub fn build_lookup_table(enums: &[Enum], vars: &[Constant]) -> ConstLookup {
         known.insert(c.get_name().to_string(), *c.get_value());
     }
     known
-}
-
-/// Resolve failed macros that reference known constants by name.
-pub fn resolve_macros<'a>(
-    vars: &mut Vec<Constant<'a>>,
-    known: &mut ConstLookup,
-    failed: &[Entity<'a>],
-) {
-    for &e in failed {
-        if let Ok(c) = Constant::try_from_macro_with_lookup(e, known) {
-            known.insert(c.get_name().to_string(), *c.get_value());
-            vars.push(c);
-        }
-    }
 }

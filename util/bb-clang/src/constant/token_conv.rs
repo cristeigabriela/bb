@@ -1,4 +1,4 @@
-//! Utilities for [`cexpr`]-[`clang`] interop.
+//! Utility to convert between [`clang`]-[`cexpr`] tokens.
 
 /// Convert a [`clang::token::Token`] to a [`cexpr::token::Token`].
 pub fn clang_to_cexpr_token(token: &clang::token::Token) -> cexpr::token::Token {

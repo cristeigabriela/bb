@@ -53,6 +53,16 @@ pub enum ConstantError {
 pub enum FunctionError {
     #[error("Entity is not a function: {0:?}")]
     NotFunction(EntityKind),
+    #[error("Entity does not have a nam")]
+    NoName,
+    #[error("Entity does not have a type")]
+    NoType,
+    #[error("Function does not have a return type")]
+    NoReturnType,
+    #[error("Entity type does not have a calling convention")]
+    NoCallingConvention,
+    #[error("ParamError: {0}")]
+    Param(#[from] ParamError),
 }
 
 #[derive(Debug, Error)]

@@ -6,7 +6,7 @@ use serde_json::Value;
 
 use crate::constant::Constant;
 use crate::enum_::Enum;
-use crate::field::Field;
+use crate::struct_::Field;
 use crate::struct_::Struct;
 
 /// Maximum nesting depth for full struct expansion.
@@ -99,11 +99,39 @@ impl ToJson for [Constant<'_>] {
     fn to_json(&self) -> Value {
         slice_to_json(self)
     }
+
+    /// Returns `{ "constants": [...], "referred_components": [...] }`.
+    ///
+    /// `referred_components` is a deduplicated, depth-first list of all
+    /// [`Constant`]s that are transitively referenced as components by the
+    /// constants in this slice. Constants already present in the slice are
+    /// excluded from `referred_components`.
+    fn to_json_full(&self) -> Value {
+        let mut obj = serde_json::json!({ "constants": self.to_json() });
+        if let Some(referred) = build_referred_components(
+            self.iter().map(|c| c.get_name().to_string()),
+            self.iter(),
+        ) {
+            obj["referred_components"] = Value::Array(referred);
+        }
+        obj
+    }
 }
 
 impl ToJson for [&Constant<'_>] {
     fn to_json(&self) -> Value {
         slice_to_json(self)
+    }
+
+    fn to_json_full(&self) -> Value {
+        let mut obj = serde_json::json!({ "constants": self.to_json() });
+        if let Some(referred) = build_referred_components(
+            self.iter().map(|c| c.get_name().to_string()),
+            self.iter().copied(),
+        ) {
+            obj["referred_components"] = Value::Array(referred);
+        }
+        obj
     }
 }
 
@@ -111,11 +139,37 @@ impl ToJson for [Enum<'_>] {
     fn to_json(&self) -> Value {
         slice_to_json(self)
     }
+
+    /// Returns `{ "enums": [...], "referred_components": [...] }`.
+    ///
+    /// `referred_components` aggregates all component constants transitively
+    /// referenced by the inline constants of every enum in the slice.
+    fn to_json_full(&self) -> Value {
+        let mut obj = serde_json::json!({ "enums": self.to_json() });
+        if let Some(referred) = build_referred_components(
+            self.iter().flat_map(|e| e.get_constants().iter().map(|c| c.get_name().to_string())),
+            self.iter().flat_map(|e| e.get_constants()),
+        ) {
+            obj["referred_components"] = Value::Array(referred);
+        }
+        obj
+    }
 }
 
 impl ToJson for [&Enum<'_>] {
     fn to_json(&self) -> Value {
         slice_to_json(self)
+    }
+
+    fn to_json_full(&self) -> Value {
+        let mut obj = serde_json::json!({ "enums": self.to_json() });
+        if let Some(referred) = build_referred_components(
+            self.iter().flat_map(|e| e.get_constants().iter().map(|c| c.get_name().to_string())),
+            self.iter().flat_map(|e| e.get_constants()),
+        ) {
+            obj["referred_components"] = Value::Array(referred);
+        }
+        obj
     }
 }
 
@@ -182,5 +236,43 @@ where
 
     fn to_json_full(&self) -> Value {
         self.as_slice().to_json_full()
+    }
+}
+
+/* ──────────────────────────── Component helpers ─────────────────────────── */
+
+/// Collect the `referred_components` array for a `to_json_full` result.
+///
+/// Seeds a `seen` set from `primary_names`, then transitively collects all
+/// component constants referenced by `constants` (depth-first, deduplicated).
+/// Returns `None` when there are no referred components.
+fn build_referred_components<'a>(
+    primary_names: impl IntoIterator<Item = String>,
+    constants: impl IntoIterator<Item = &'a Constant<'a>>,
+) -> Option<Vec<Value>> {
+    let mut seen: HashSet<String> = primary_names.into_iter().collect();
+    let mut referred = Vec::new();
+    for c in constants {
+        collect_component_constants(c, &mut seen, &mut referred);
+    }
+    if referred.is_empty() { None } else { Some(referred) }
+}
+
+/// Recursively collect all [`Constant`]s transitively referenced as components,
+/// depth-first (dependencies before dependents), deduplicating via `seen`.
+///
+/// Constants whose names are already in `seen` (i.e. already in the main
+/// result set or already collected) are skipped.
+pub fn collect_component_constants(
+    c: &Constant,
+    seen: &mut HashSet<String>,
+    result: &mut Vec<Value>,
+) {
+    for comp in c.get_component_constants() {
+        // Recurse into this component's own dependencies first.
+        collect_component_constants(comp, seen, result);
+        if seen.insert(comp.get_name().to_string()) {
+            result.push(comp.to_json());
+        }
     }
 }

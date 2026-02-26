@@ -14,9 +14,9 @@ Instead of working over something like clang bindings to Rust, we use [`clang-rs
 
 The purpose is to take in the entity object, and lift it to a structured representation of itself. Some of them would be:
 
-- **[`Struct`](./src/struct_.rs)** -- A structured representation of C/C++ `struct` (or `class`) declarations. They most often contain [`Field`](./src/field.rs)s.
+- **[`Struct`](./src/struct_/mod.rs)** -- A structured representation of C/C++ `struct` (or `class`) declarations. They most often contain [`Field`](./src/struct_/field.rs)s.
 
-- **[`Field`](./src/field.rs)** -- A structured representation of C/C++ field declarations. They are always the semantic children of [`Struct`](./src/struct_.rs)s and their declaration's underlying type might be used to obtain a new [`Struct`](./src/struct_.rs) as well.
+- **[`Field`](./src/struct_/field.rs)** -- A structured representation of C/C++ field declarations. They are always the semantic children of [`Struct`](./src/struct_/mod.rs)s and their declaration's underlying type might be used to obtain a new [`Struct`](./src/struct_/mod.rs) as well.
 
 - **[`Enum`](./src/enum_.rs)** -- A structured representation of C/C++ enum declarations. They most often contain [`Constant`](./src/constant/mod.rs) of the specific enum constant declaration kind, and they have an associated type.
 
@@ -33,7 +33,7 @@ We also offer:
 
 - **[`SourceLocation`](./src/location.rs)** -- A simple abstraction over source locations. Carries both the **filename** (used in serialization) and the **full path** (available via `path()` for programmatic use, skipped during serialization).
 
-- **[`Traits`](./src/traits.rs)** -- Some extensions over clang-rs that made the experience personally better for me, but they may be a bit opinionated.
+- **[`clang_ext`](./src/clang_ext.rs)** -- Extension traits over `clang-rs` types (`AnonymousType`, `DeclarationKind`, `UnderlyingType`, `HasChildrenType`). These are used throughout the crate to simplify working with the clang AST.
 
 ---
 

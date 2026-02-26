@@ -3,7 +3,7 @@
 use clang::{Entity, EntityKind, Type};
 use serde::Serialize;
 
-use crate::{SourceLocation, error::ParamError, traits::UnderlyingType};
+use crate::{SourceLocation, clang_ext::UnderlyingType, error::ParamError};
 
 /* ────────────────────────────────── Types ───────────────────────────────── */
 

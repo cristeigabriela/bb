@@ -1,11 +1,12 @@
 //! Field type representation.
 
+use crate::clang_ext::{AnonymousType, HasChildrenType, UnderlyingType};
 use crate::error::FieldError;
 use crate::location::SourceLocation;
-use crate::struct_::Struct;
-use crate::traits::{AnonymousType, HasChildrenType, UnderlyingType};
 use clang::{Entity, EntityKind, Type};
 use serde::Serialize;
+
+use super::Struct;
 
 /* ────────────────────────────────── Types ───────────────────────────────── */
 

@@ -8,9 +8,11 @@ use colored::Colorize;
 use crate::location::SourceLocation;
 
 mod const_;
+mod enum_;
 mod struct_;
 
-pub use const_::{render_constants, render_enum, render_enum_constants};
+pub use const_::render_constants;
+pub use enum_::{render_enum, render_enum_constants};
 pub use struct_::render_struct;
 
 /// Render a type header line: styled name + optional type info + optional location.

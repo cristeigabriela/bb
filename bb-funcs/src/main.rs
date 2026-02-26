@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use anyhow::Result;
+use bb_clang::Function;
 use bb_cli::get_header_config;
 use bb_funcs_lib::iter_funcs;
 use clang::{Clang, Entity, EntityKind, Index};
@@ -52,15 +53,22 @@ fn main() -> Result<()> {
 
     // there can be other children like dllimport, typeref for return type, etc
     let args: Vec<Entity<'_>> = f
-        .get_children()
-        .into_iter()
-        .filter(|x| x.get_kind() == EntityKind::ParmDecl)
-        .collect();
+        .get_children();
     dbg!(&args);
-    let arg = args[0];
-    let arg_type = arg.get_type().unwrap();
-    dbg!(arg);
-    dbg!(arg_type);
+    let all_children_kind =  iter_funcs(&tu)
+        .map(|x| x.get_children())
+        .flatten();
+    let mut ek: HashSet<clang::EntityKind> = HashSet::new();
+    for entry in all_children_kind {
+        if entry.get_kind() == EntityKind::DllImport {
+            dbg!(&entry);
+        }
+        ek.insert(entry.get_kind());
+    }
+    dbg!(&ek);
+    
+    let _f = Function::try_from(f).unwrap();
+    //dbg!(&f);
 
     Ok(())
 }

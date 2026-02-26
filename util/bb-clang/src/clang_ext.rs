@@ -1,4 +1,4 @@
-//! Expansions to clang library, as I believe are suited for this project.
+//! Extension traits for [`clang`] library types.
 
 use clang::{EntityKind, Type};
 

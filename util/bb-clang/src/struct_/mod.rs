@@ -1,10 +1,14 @@
 //! Struct type representation.
 
+mod field;
+
+pub use field::Field;
+use field::collect_fields;
+
+use crate::clang_ext::{AnonymousType, DeclarationKind};
 use crate::display;
 use crate::error::StructError;
-use crate::field::{Field, collect_fields};
 use crate::location::SourceLocation;
-use crate::traits::{AnonymousType, DeclarationKind};
 use clang::{Entity, EntityKind};
 use serde::Serialize;
 use std::collections::HashSet;

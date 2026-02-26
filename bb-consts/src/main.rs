@@ -1,13 +1,16 @@
+use std::collections::HashSet;
+
 use anyhow::Result;
-use bb_clang::{ConstLookup, Constant, Enum, ToJson, render_constants};
+use bb_clang::{ConstLookup, Constant, Enum, ToJson, collect_component_constants, render_constants};
 use bb_cli::{get_header_config, print_suggestions};
 use bb_consts_lib::{
     ConstFilter, build_lookup_table, collect_constants, collect_enums, filter_constants_by_name,
-    iter_enums, parse_name_pattern, resolve_macros,
+    iter_enums, parse_name_pattern,
 };
 use bb_shared::glob_match;
 use clang::{Clang, Index};
 use clap::Parser;
+use serde_json::Value;
 
 /* ─────────────────────────────────── CLI ────────────────────────────────── */
 
@@ -63,7 +66,6 @@ fn main() -> Result<()> {
     let tu = config.parse(&index, true)?;
 
     // Get (optional) enum from name, and (optional) constant pattern.
-    // You must have at least one of either depending on how you invoke the command.
     let (enum_from_name, const_pattern) = parse_name_pattern(args.name.as_deref());
 
     let filter = ConstFilter {
@@ -79,20 +81,16 @@ fn main() -> Result<()> {
     };
 
     let enums = collect_enums(&tu, &filter);
-    let (mut vars, failed_macros) = collect_constants(&tu, &filter);
+    let vars = collect_constants(&tu, &filter);
 
-    // Build lookup from ALL collected constants (unfiltered by name) so that
-    // macros like `#define IMAGEHLP_SYMBOL_INFO_TLSRELATIVE SYMF_TLSREL`
-    // can resolve even when the referenced constant doesn't match the pattern.
-    let mut known = build_lookup_table(&enums, &vars);
-    resolve_macros(&mut vars, &mut known, &failed_macros);
+    // Build display lookup from all collected constants.
+    let known = build_lookup_table(&enums, &vars);
 
-    // Apply name filter AFTER resolution.
+    // Apply name filter AFTER collection (collection is always unfiltered by
+    // name so the TU entity map contains every constant needed for resolution).
     let vars = filter_constants_by_name(vars, &filter);
 
     // Suggest close constant names when nothing matched the const pattern.
-    // Check both standalone vars AND enum children — if neither has a hit,
-    // the user likely typo'd.
     if let Some(pat) = filter.const_pattern.as_deref() {
         let has_enum_hit = enums.iter().any(|e| {
             e.get_constants()
@@ -125,7 +123,6 @@ fn main() -> Result<()> {
 
 /* ──────────────────────────────── Printing ──────────────────────────────── */
 
-/// Print enums first, then print non-scoped constants (vars, macros, ...)
 fn print_display(enums: &[Enum], vars: &[Constant], filter: &ConstFilter, lookup: &ConstLookup) {
     for e in enums {
         match filter.const_pattern.as_deref() {
@@ -139,8 +136,9 @@ fn print_display(enums: &[Enum], vars: &[Constant], filter: &ConstFilter, lookup
     }
 }
 
-/// Collect enums, their contents, and non-scoped constants (vars, macros, ...) into a JSON,
-/// and pretty-print it.
+/// Collect enums, their contents, and non-scoped constants into a JSON,
+/// with a `referred_components` field containing fully serialized objects
+/// for every constant transitively referenced as a component.
 fn print_json(enums: &[Enum], vars: &[Constant], filter: &ConstFilter) -> Result<()> {
     let filtered_enums: Vec<&Enum> = enums
         .iter()
@@ -154,11 +152,35 @@ fn print_json(enums: &[Enum], vars: &[Constant], filter: &ConstFilter) -> Result
         .collect();
 
     let command = std::env::args().collect::<Vec<_>>().join(" ");
-    let output = serde_json::json!({
+
+    // Collect referred_components from both standalone constants and enum
+    // member constants, excluding names already present in the result set.
+    let mut seen: HashSet<String> = vars.iter().map(|c| c.get_name().to_string()).collect();
+    for e in &filtered_enums {
+        for c in e.get_constants() {
+            seen.insert(c.get_name().to_string());
+        }
+    }
+
+    let mut referred: Vec<Value> = Vec::new();
+    for c in vars {
+        collect_component_constants(c, &mut seen, &mut referred);
+    }
+    for e in &filtered_enums {
+        for c in e.get_constants() {
+            collect_component_constants(c, &mut seen, &mut referred);
+        }
+    }
+
+    let mut output = serde_json::json!({
         "command": command,
-        "enums": filtered_enums.to_json(),
         "constants": vars.to_json(),
+        "enums": filtered_enums.to_json(),
     });
+
+    if !referred.is_empty() {
+        output["referred_components"] = Value::Array(referred);
+    }
 
     println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())

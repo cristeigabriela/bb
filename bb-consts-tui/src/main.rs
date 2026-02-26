@@ -4,7 +4,6 @@ use anyhow::Result;
 use bb_cli::get_header_config;
 use bb_consts_lib::{
     ConstFilter, build_lookup_table, collect_constants, collect_enums, parse_name_pattern,
-    resolve_macros,
 };
 use clang::{Clang, Index};
 use clap::Parser;
@@ -72,9 +71,8 @@ fn main() -> Result<()> {
     };
 
     let enums = collect_enums(&tu, &filter);
-    let (mut vars, failed_macros) = collect_constants(&tu, &filter);
-    let mut known = build_lookup_table(&enums, &vars);
-    resolve_macros(&mut vars, &mut known, &failed_macros);
+    let vars = collect_constants(&tu, &filter);
+    let known = build_lookup_table(&enums, &vars);
 
     let initial_search = match args.name.as_deref() {
         Some(n) if !n.contains("::") => n,

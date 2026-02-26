@@ -5,8 +5,10 @@
 //! and `#define` macros (via [`cexpr`]).
 
 mod macro_;
+mod token_conv;
 mod value;
 
+pub use macro_::{build_tu_entity_map, TuEntityMap};
 pub use value::{ConstLookup, ConstValue};
 
 use clang::token::Token;
@@ -14,9 +16,9 @@ use clang::token::TokenKind;
 use clang::{Entity, EntityKind};
 use serde::Serialize;
 
-use crate::cexpr::clang_to_cexpr_token;
 use crate::error::ConstantError;
 use crate::location::SourceLocation;
+use token_conv::clang_to_cexpr_token;
 
 /* ────────────────────────────────── Macro ───────────────────────────────── */
 
@@ -53,14 +55,18 @@ pub struct Constant<'a> {
     #[serde(skip)]
     body_tokens: Vec<MacroBodyToken>,
     /// Names of other constants this macro is composed of.
-    /// Populated automatically for macros built via
-    /// [`try_from_macro_with_lookup`](Self::try_from_macro_with_lookup).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     components: Vec<String>,
+    /// Fully resolved [`Constant`] objects for each name in [`components`](Self::components).
+    /// Skipped during serialization; used by [`ToJson::to_json_full`] to emit
+    /// `referred_components` at the root JSON level.
+    #[serde(skip)]
+    component_constants: Vec<Constant<'a>>,
 }
 
 impl<'a> Constant<'a> {
     /// Internal constructor for use by submodules.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         entity: Entity<'a>,
         name: String,
@@ -69,6 +75,7 @@ impl<'a> Constant<'a> {
         location: Option<SourceLocation>,
         body_tokens: Vec<MacroBodyToken>,
         components: Vec<String>,
+        component_constants: Vec<Constant<'a>>,
     ) -> Self {
         let hex = value.to_string();
         Self {
@@ -80,6 +87,7 @@ impl<'a> Constant<'a> {
             location,
             body_tokens,
             components,
+            component_constants,
         }
     }
 
@@ -130,12 +138,17 @@ impl<'a> Constant<'a> {
     }
 
     /// Names of other constants this macro is composed of.
-    ///
-    /// Populated automatically for macros built via
-    /// [`try_from_macro_with_lookup`](Self::try_from_macro_with_lookup).
     #[must_use]
     pub fn get_components(&self) -> &[String] {
         &self.components
+    }
+
+    /// Fully resolved [`Constant`] objects for each entry in [`get_components`](Self::get_components).
+    ///
+    /// Used by [`ToJson::to_json_full`] to emit `referred_components`.
+    #[must_use]
+    pub fn get_component_constants(&self) -> &[Constant<'a>] {
+        &self.component_constants
     }
 }
 
@@ -197,6 +210,7 @@ impl<'a> TryFrom<Entity<'a>> for Constant<'a> {
             location,
             body_tokens,
             components: Vec::new(),
+            component_constants: Vec::new(),
         })
     }
 }

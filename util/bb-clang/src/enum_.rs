@@ -3,11 +3,11 @@
 use clang::{Entity, EntityKind, Type};
 use serde::Serialize;
 
+use crate::clang_ext::AnonymousType;
 use crate::constant::Constant;
 use crate::display;
 use crate::error::EnumError;
 use crate::location::SourceLocation;
-use crate::traits::AnonymousType;
 
 /* ────────────────────────────────── Types ───────────────────────────────── */
 
