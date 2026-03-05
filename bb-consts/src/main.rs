@@ -150,10 +150,8 @@ fn print_json(enums: &[Enum], vars: &[Constant], filter: &ConstFilter) -> Result
 
     let command = std::env::args().collect::<Vec<_>>().join(" ");
 
-    let referred = build_referred_components(
-        vars.iter().map(|c| c.get_name().to_string()),
-        vars.iter(),
-    );
+    let referred =
+        build_referred_components(vars.iter().map(|c| c.get_name().to_string()), vars.iter());
 
     let output = serde_json::json!({
         "command": command,

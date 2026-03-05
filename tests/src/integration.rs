@@ -739,11 +739,15 @@ mod tests {
 
         // Each referred component has a name field
         for comp in referred {
-            assert!(comp["name"].is_string(), "referred component must have a name");
+            assert!(
+                comp["name"].is_string(),
+                "referred component must have a name"
+            );
         }
 
         // Every name listed in components[] must appear in referred_components
-        let referred_names: Vec<&str> = referred.iter().filter_map(|c| c["name"].as_str()).collect();
+        let referred_names: Vec<&str> =
+            referred.iter().filter_map(|c| c["name"].as_str()).collect();
         for name in faa.get_components() {
             assert!(
                 referred_names.contains(&name.as_str()),
@@ -769,7 +773,9 @@ mod tests {
         let full = vars.to_json_full();
 
         // Top-level shape
-        let constants = full["constants"].as_array().expect("should have constants array");
+        let constants = full["constants"]
+            .as_array()
+            .expect("should have constants array");
         let referred = full["referred_components"]
             .as_array()
             .expect("should have referred_components array");
@@ -780,8 +786,10 @@ mod tests {
         }
 
         // referred_components must not duplicate names already in constants
-        let constant_names: std::collections::HashSet<&str> =
-            constants.iter().filter_map(|c| c["name"].as_str()).collect();
+        let constant_names: std::collections::HashSet<&str> = constants
+            .iter()
+            .filter_map(|c| c["name"].as_str())
+            .collect();
         for r in referred {
             let name = r["name"].as_str().unwrap_or("");
             assert!(
@@ -794,7 +802,10 @@ mod tests {
         let mut seen = std::collections::HashSet::new();
         for r in referred {
             let name = r["name"].as_str().unwrap_or("");
-            assert!(seen.insert(name), "referred_components has duplicate '{name}'");
+            assert!(
+                seen.insert(name),
+                "referred_components has duplicate '{name}'"
+            );
         }
 
         Ok(())

@@ -133,7 +133,6 @@ impl ToJson for [Constant<'_>] {
     }
 }
 
-
 impl ToJson for [&Constant<'_>] {
     fn to_json(&self) -> Value {
         slice_to_json(self)

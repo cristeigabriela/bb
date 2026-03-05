@@ -52,12 +52,9 @@ fn main() -> Result<()> {
     dbg!(t.get_calling_convention());
 
     // there can be other children like dllimport, typeref for return type, etc
-    let args: Vec<Entity<'_>> = f
-        .get_children();
+    let args: Vec<Entity<'_>> = f.get_children();
     dbg!(&args);
-    let all_children_kind =  iter_funcs(&tu)
-        .map(|x| x.get_children())
-        .flatten();
+    let all_children_kind = iter_funcs(&tu).map(|x| x.get_children()).flatten();
     let mut ek: HashSet<clang::EntityKind> = HashSet::new();
     for entry in all_children_kind {
         if entry.get_kind() == EntityKind::DllImport {
@@ -66,7 +63,7 @@ fn main() -> Result<()> {
         ek.insert(entry.get_kind());
     }
     dbg!(&ek);
-    
+
     let _f = Function::try_from(f).unwrap();
     //dbg!(&f);
 

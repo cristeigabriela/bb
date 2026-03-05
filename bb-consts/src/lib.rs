@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-use bb_clang::{build_tu_entity_map, ConstLookup, Constant, Enum};
+use bb_clang::{ConstLookup, Constant, Enum, build_tu_entity_map};
 use bb_shared::glob_match;
 use clang::{Entity, EntityKind, TranslationUnit};
 

@@ -16,16 +16,48 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Fetch all history for tags
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Get version
+      - name: Determine version and revision
         id: get_version
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Extract version from Cargo.toml
           $version = (Get-Content Cargo.toml -Raw | Select-String -Pattern '(?ms)\[workspace\.package\].*?version\s*=\s*"(.*?)"').Matches.Groups[1].Value
-          "version=$version" | Add-Content -Path $env:GITHUB_OUTPUT
+          $base_tag = "v$version"
+          
+          # Fetch existing tags to check for duplicates
+          $tags = gh tag list --limit 1000
+          
+          if ($null -eq $tags -or ($tags.Count -eq 0) -or ($tags -notcontains $base_tag)) {
+              $tag = $base_tag
+              $name = $base_tag
+          } else {
+              # Base tag exists, find the highest revision vX.Y.Z-revN
+              $rev_pattern = [regex]::Escape($base_tag) + "-rev(\d+)$"
+              $max_rev = 0
+              foreach ($t in $tags) {
+                  if ($t -match $rev_pattern) {
+                      $rev = [int]$matches[1]
+                      if ($rev -gt $max_rev) { $max_rev = $rev }
+                  }
+              }
+              $next_rev = $max_rev + 1
+              $tag = "$base_tag-rev$next_rev"
+              $name = "$base_tag -- revision ($next_rev)"
+          }
+          
+          Write-Output "Target Tag: $tag"
+          Write-Output "Release Name: $name"
+          
+          "tag=$tag" | Add-Content -Path $env:GITHUB_OUTPUT
+          "name=$name" | Add-Content -Path $env:GITHUB_OUTPUT
 
       - name: Build all binaries
         run: cargo build --release
@@ -34,11 +66,12 @@ jobs:
         shell: pwsh
         run: |
           mkdir release_assets
-          # Find all .exe files in target/release, but skip those in deps/ and build/
-          $exes = Get-ChildItem -Path target/release/*.exe -Exclude *.pdb, *.d
+          # Find all .exe files in target/release, skipping subdirectories like deps/
+          $target_dir = (Resolve-Path "target/release").Path
+          $exes = Get-ChildItem -Path "target/release/*.exe" -Exclude *.pdb, *.d
           foreach ($exe in $exes) {
-            # Check if it's in the root of target/release (not in a subdirectory)
-            if ($exe.DirectoryName -eq (Resolve-Path "target/release").Path) {
+            if ($exe.DirectoryName -eq $target_dir) {
+              Write-Output "Packaging $($exe.Name)"
               cp $exe.FullName "release_assets/$($exe.Name)"
             }
           }
@@ -46,7 +79,8 @@ jobs:
       - name: Create or Update Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.get_version.outputs.version }}
+          tag_name: ${{ steps.get_version.outputs.tag }}
+          name: ${{ steps.get_version.outputs.name }}
           files: |
             release_assets/*.exe
           generate_release_notes: true

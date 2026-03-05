@@ -13,7 +13,10 @@ mod json;
 pub(crate) mod location;
 mod struct_;
 
-pub use constant::{build_tu_entity_map, ConstLookup, ConstValue, Constant, MacroBodyToken, StripOuterParens, TuEntityMap};
+pub use constant::{
+    ConstLookup, ConstValue, Constant, MacroBodyToken, StripOuterParens, TuEntityMap,
+    build_tu_entity_map,
+};
 pub use display::render_constants;
 pub use enum_::Enum;
 pub use error::{ConstantError, EnumError, FieldError, StructError};

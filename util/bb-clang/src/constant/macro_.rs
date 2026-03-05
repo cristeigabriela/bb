@@ -145,8 +145,7 @@ impl<'a> Constant<'a> {
                 if let Some(value) = local_lookup.get(&spelling) {
                     let raw = value.as_u64().ok_or(ConstantError::NotEvaluable)?;
                     let literal = format!("0x{raw:X}");
-                    cexpr_tokens
-                        .push((cexpr::token::Kind::Literal, literal.as_bytes()).into());
+                    cexpr_tokens.push((cexpr::token::Kind::Literal, literal.as_bytes()).into());
                     body_tokens.push(MacroBodyToken {
                         is_identifier: true,
                         lit_representation: spelling,

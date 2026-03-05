@@ -8,7 +8,7 @@ mod macro_;
 mod token_conv;
 mod value;
 
-pub use macro_::{build_tu_entity_map, TuEntityMap};
+pub use macro_::{TuEntityMap, build_tu_entity_map};
 pub use value::{ConstLookup, ConstValue};
 
 use clang::token::Token;
