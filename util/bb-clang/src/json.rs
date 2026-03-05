@@ -32,6 +32,20 @@ impl ToJson for Constant<'_> {
     fn to_json(&self) -> Value {
         serde_json::to_value(self).unwrap()
     }
+
+    /// Like [`to_json`](ToJson::to_json) but with a `referred_components` field
+    /// containing the fully serialized component constants.
+    fn to_json_full(&self) -> Value {
+        let mut val = self.to_json();
+        val.as_object_mut().unwrap().insert(
+            "referred_components".to_string(),
+            serde_json::json!(build_referred_components(
+                std::iter::once(self.get_name().to_string()),
+                std::slice::from_ref(self).iter(),
+            )),
+        );
+        val
+    }
 }
 
 impl ToJson for Enum<'_> {
@@ -68,11 +82,11 @@ impl ToJson for Struct<'_> {
             .extract_nested_types(MAX_DEPTH)
             .into_iter()
             .filter(|n| seen.insert(n.get_name().to_string()))
-            .map(|n| n.to_json())
+            .map(|n| serde_json::to_value(n).unwrap())
             .collect();
 
         serde_json::json!({
-            "type": self.to_json(),
+            "type": serde_json::to_value(self).unwrap(),
             "referenced_types": referenced,
         })
     }
@@ -107,31 +121,22 @@ impl ToJson for [Constant<'_>] {
     /// constants in this slice. Constants already present in the slice are
     /// excluded from `referred_components`.
     fn to_json_full(&self) -> Value {
-        let mut obj = serde_json::json!({ "constants": self.to_json() });
-        if let Some(referred) = build_referred_components(
-            self.iter().map(|c| c.get_name().to_string()),
-            self.iter(),
-        ) {
-            obj["referred_components"] = Value::Array(referred);
+        let mut seen: HashSet<String> = self.iter().map(|c| c.get_name().to_string()).collect();
+        let mut referred = Vec::new();
+        for c in self {
+            collect_component_constants(c, &mut seen, &mut referred);
         }
-        obj
+        serde_json::json!({
+            "constants": self.to_json(),
+            "referred_components": referred,
+        })
     }
 }
+
 
 impl ToJson for [&Constant<'_>] {
     fn to_json(&self) -> Value {
         slice_to_json(self)
-    }
-
-    fn to_json_full(&self) -> Value {
-        let mut obj = serde_json::json!({ "constants": self.to_json() });
-        if let Some(referred) = build_referred_components(
-            self.iter().map(|c| c.get_name().to_string()),
-            self.iter().copied(),
-        ) {
-            obj["referred_components"] = Value::Array(referred);
-        }
-        obj
     }
 }
 
@@ -139,37 +144,11 @@ impl ToJson for [Enum<'_>] {
     fn to_json(&self) -> Value {
         slice_to_json(self)
     }
-
-    /// Returns `{ "enums": [...], "referred_components": [...] }`.
-    ///
-    /// `referred_components` aggregates all component constants transitively
-    /// referenced by the inline constants of every enum in the slice.
-    fn to_json_full(&self) -> Value {
-        let mut obj = serde_json::json!({ "enums": self.to_json() });
-        if let Some(referred) = build_referred_components(
-            self.iter().flat_map(|e| e.get_constants().iter().map(|c| c.get_name().to_string())),
-            self.iter().flat_map(|e| e.get_constants()),
-        ) {
-            obj["referred_components"] = Value::Array(referred);
-        }
-        obj
-    }
 }
 
 impl ToJson for [&Enum<'_>] {
     fn to_json(&self) -> Value {
         slice_to_json(self)
-    }
-
-    fn to_json_full(&self) -> Value {
-        let mut obj = serde_json::json!({ "enums": self.to_json() });
-        if let Some(referred) = build_referred_components(
-            self.iter().flat_map(|e| e.get_constants().iter().map(|c| c.get_name().to_string())),
-            self.iter().flat_map(|e| e.get_constants()),
-        ) {
-            obj["referred_components"] = Value::Array(referred);
-        }
-        obj
     }
 }
 
@@ -245,17 +224,17 @@ where
 ///
 /// Seeds a `seen` set from `primary_names`, then transitively collects all
 /// component constants referenced by `constants` (depth-first, deduplicated).
-/// Returns `None` when there are no referred components.
-fn build_referred_components<'a>(
+/// Returns an empty `Vec` when there are no referred components.
+pub fn build_referred_components<'a>(
     primary_names: impl IntoIterator<Item = String>,
     constants: impl IntoIterator<Item = &'a Constant<'a>>,
-) -> Option<Vec<Value>> {
+) -> Vec<Value> {
     let mut seen: HashSet<String> = primary_names.into_iter().collect();
     let mut referred = Vec::new();
     for c in constants {
         collect_component_constants(c, &mut seen, &mut referred);
     }
-    if referred.is_empty() { None } else { Some(referred) }
+    referred
 }
 
 /// Recursively collect all [`Constant`]s transitively referenced as components,

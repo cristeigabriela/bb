@@ -3,10 +3,9 @@ mod tests {
     use serial_test::serial;
 
     use anyhow::Context;
-    use bb_clang::{Enum, Struct, ToJson};
+    use bb_clang::{Enum, Struct, ToJson, build_referred_components};
     use bb_consts_lib::{
-        ConstFilter, build_lookup_table, collect_constants, collect_enums,
-        filter_constants_by_name, resolve_macros,
+        ConstFilter, build_lookup_table, collect_constants, collect_enums, filter_constants_by_name,
     };
     use bb_sdk::{Arch, HeaderConfig, SdkMode};
     use bb_types_lib::{StructFilter, collect_structs, iter_structs};
@@ -365,38 +364,22 @@ mod tests {
 
         let filter = no_filter();
 
-        // Step 1: Collect directly-evaluable constants and failed macros
-        let (mut vars, failed) = collect_constants(&tu, &filter);
-        let initial_count = vars.len();
+        let vars = collect_constants(&tu, &filter);
         assert!(
-            initial_count > 100,
-            "should find many constants, got {initial_count}"
-        );
-        assert!(
-            !failed.is_empty(),
-            "some macros should fail initial evaluation"
-        );
-
-        // Step 2: Collect enums for the lookup table
-        let enums = collect_enums(&tu, &filter);
-
-        // Step 3: Build lookup table from known values
-        let mut lookup = build_lookup_table(&enums, &vars);
-        assert!(!lookup.is_empty(), "lookup table should have entries");
-
-        // Step 4: Resolve failed macros using identifier substitution
-        resolve_macros(&mut vars, &mut lookup, &failed);
-        assert!(
-            vars.len() > initial_count,
-            "resolve_macros should recover additional constants ({initial_count} -> {})",
+            vars.len() > 100,
+            "should find many constants, got {}",
             vars.len()
         );
 
-        // Lookup table should have grown from resolved macros
+        // Macro constants (including composed ones) should be present
         assert!(
-            lookup.len() > enums.len(),
-            "lookup should contain more than just enum values"
+            vars.iter().any(|c| c.is_macro()),
+            "should find macro constants"
         );
+
+        let enums = collect_enums(&tu, &filter);
+        let lookup = build_lookup_table(&enums, &vars);
+        assert!(!lookup.is_empty(), "lookup table should have entries");
 
         Ok(())
     }
@@ -406,11 +389,7 @@ mod tests {
     fn known_macro_constants() -> anyhow::Result<()> {
         winsdk!(clang, index, tu);
 
-        let filter = no_filter();
-        let (mut vars, failed) = collect_constants(&tu, &filter);
-        let enums = collect_enums(&tu, &filter);
-        let mut lookup = build_lookup_table(&enums, &vars);
-        resolve_macros(&mut vars, &mut lookup, &failed);
+        let vars = collect_constants(&tu, &no_filter());
 
         // MAX_PATH = 260 (minwindef.h)
         let max_path = vars
@@ -451,12 +430,7 @@ mod tests {
             ..no_filter()
         };
 
-        let (mut vars, failed) = collect_constants(&tu, &filter);
-        let enums = collect_enums(&tu, &filter);
-        let mut lookup = build_lookup_table(&enums, &vars);
-        resolve_macros(&mut vars, &mut lookup, &failed);
-
-        // Name filter is applied post-resolution
+        let vars = collect_constants(&tu, &filter);
         let filtered = filter_constants_by_name(vars, &filter);
         assert!(!filtered.is_empty(), "should find MAX_* constants");
 
@@ -487,14 +461,10 @@ mod tests {
             ..no_filter()
         };
 
-        let (vars, failed) = collect_constants(&tu, &filter);
+        let vars = collect_constants(&tu, &filter);
         assert!(
             vars.is_empty(),
             "scoped_to_enum should skip constant collection"
-        );
-        assert!(
-            failed.is_empty(),
-            "scoped_to_enum should skip failed macros too"
         );
 
         Ok(())
@@ -506,10 +476,9 @@ mod tests {
         winsdk!(clang, index, tu);
 
         let filter = no_filter();
-        let (mut vars, failed) = collect_constants(&tu, &filter);
+        let vars = collect_constants(&tu, &filter);
         let enums = collect_enums(&tu, &filter);
-        let mut lookup = build_lookup_table(&enums, &vars);
-        resolve_macros(&mut vars, &mut lookup, &failed);
+        let lookup = build_lookup_table(&enums, &vars);
 
         // There should be at least some composed macro constants in the SDK
         let composed: Vec<_> = vars
@@ -603,11 +572,7 @@ mod tests {
     fn constant_json_structure() -> anyhow::Result<()> {
         winsdk!(clang, index, tu);
 
-        let filter = no_filter();
-        let (mut vars, failed) = collect_constants(&tu, &filter);
-        let enums = collect_enums(&tu, &filter);
-        let mut lookup = build_lookup_table(&enums, &vars);
-        resolve_macros(&mut vars, &mut lookup, &failed);
+        let vars = collect_constants(&tu, &no_filter());
 
         // Single constant
         let max_path = vars
@@ -734,6 +699,139 @@ mod tests {
             full.is_absolute(),
             "full path should be absolute, got: {}",
             full.display()
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn constant_scalar_to_json_full() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let vars = collect_constants(&tu, &no_filter());
+
+        // FILE_ALL_ACCESS is composed of STANDARD_RIGHTS_REQUIRED | SYNCHRONIZE | ...
+        let faa = match vars.iter().find(|c| c.get_name() == "FILE_ALL_ACCESS") {
+            Some(c) => c,
+            None => return Ok(()), // not all SDK configs expose this — skip
+        };
+
+        assert!(
+            !faa.get_components().is_empty(),
+            "FILE_ALL_ACCESS should have component constants"
+        );
+
+        let j = faa.to_json_full();
+
+        // Flat JSON — no "constant" wrapper
+        assert_eq!(j["name"], "FILE_ALL_ACCESS");
+        assert!(j["value"].is_number(), "value should be a number");
+
+        // referred_components must be present and non-empty
+        let referred = j["referred_components"]
+            .as_array()
+            .expect("to_json_full must include referred_components array");
+        assert!(
+            !referred.is_empty(),
+            "FILE_ALL_ACCESS should have non-empty referred_components"
+        );
+
+        // Each referred component has a name field
+        for comp in referred {
+            assert!(comp["name"].is_string(), "referred component must have a name");
+        }
+
+        // Every name listed in components[] must appear in referred_components
+        let referred_names: Vec<&str> = referred.iter().filter_map(|c| c["name"].as_str()).collect();
+        for name in faa.get_components() {
+            assert!(
+                referred_names.contains(&name.as_str()),
+                "component '{name}' should appear in referred_components"
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn constant_slice_to_json_full() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let filter = ConstFilter {
+            const_pattern: Some("FILE_*".into()),
+            ..no_filter()
+        };
+        let vars = collect_constants(&tu, &filter);
+        assert!(!vars.is_empty(), "should find FILE_* constants");
+
+        let full = vars.to_json_full();
+
+        // Top-level shape
+        let constants = full["constants"].as_array().expect("should have constants array");
+        let referred = full["referred_components"]
+            .as_array()
+            .expect("should have referred_components array");
+
+        // Every constant entry has a name
+        for c in constants {
+            assert!(c["name"].is_string(), "each constant must have a name");
+        }
+
+        // referred_components must not duplicate names already in constants
+        let constant_names: std::collections::HashSet<&str> =
+            constants.iter().filter_map(|c| c["name"].as_str()).collect();
+        for r in referred {
+            let name = r["name"].as_str().unwrap_or("");
+            assert!(
+                !constant_names.contains(name),
+                "referred_components should not contain '{name}' which is already in constants"
+            );
+        }
+
+        // referred_components must not contain duplicate names
+        let mut seen = std::collections::HashSet::new();
+        for r in referred {
+            let name = r["name"].as_str().unwrap_or("");
+            assert!(seen.insert(name), "referred_components has duplicate '{name}'");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn build_referred_components_is_empty_when_no_components() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let vars = collect_constants(&tu, &no_filter());
+
+        // MAX_PATH is a simple numeric literal — no component constants
+        let max_path = vars
+            .iter()
+            .find(|c| c.get_name() == "MAX_PATH")
+            .expect("MAX_PATH must exist");
+
+        assert!(
+            max_path.get_components().is_empty(),
+            "MAX_PATH should have no components"
+        );
+
+        let referred = build_referred_components(
+            std::iter::once(max_path.get_name().to_string()),
+            std::slice::from_ref(max_path).iter(),
+        );
+        assert!(
+            referred.is_empty(),
+            "build_referred_components for MAX_PATH should be empty"
+        );
+
+        let j = max_path.to_json_full();
+        assert_eq!(
+            j["referred_components"].as_array().map(|a| a.len()),
+            Some(0),
+            "to_json_full on a simple constant should have empty referred_components"
         );
 
         Ok(())

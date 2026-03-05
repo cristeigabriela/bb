@@ -48,7 +48,7 @@ pub struct Constant<'a> {
     name: String,
     value: ConstValue,
     hex: String,
-    #[serde(rename = "type")]
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
     type_name: Option<String>,
     location: Option<SourceLocation>,
     /// Raw macro body tokens (identifier flag + spelling). Empty for non-macros.

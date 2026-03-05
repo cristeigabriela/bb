@@ -19,7 +19,7 @@ pub use enum_::Enum;
 pub use error::{ConstantError, EnumError, FieldError, StructError};
 pub use function::Function;
 pub use function::Param;
-pub use json::{ToJson, collect_component_constants};
+pub use json::{ToJson, build_referred_components, collect_component_constants};
 pub use location::SourceLocation;
 pub use struct_::Field;
 pub use struct_::Struct;

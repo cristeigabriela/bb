@@ -1,7 +1,5 @@
-use std::collections::HashSet;
-
 use anyhow::Result;
-use bb_clang::{ConstLookup, Constant, Enum, ToJson, collect_component_constants, render_constants};
+use bb_clang::{ConstLookup, Constant, Enum, ToJson, build_referred_components, render_constants};
 use bb_cli::{get_header_config, print_suggestions};
 use bb_consts_lib::{
     ConstFilter, build_lookup_table, collect_constants, collect_enums, filter_constants_by_name,
@@ -10,7 +8,6 @@ use bb_consts_lib::{
 use bb_shared::glob_match;
 use clang::{Clang, Index};
 use clap::Parser;
-use serde_json::Value;
 
 /* ─────────────────────────────────── CLI ────────────────────────────────── */
 
@@ -153,34 +150,17 @@ fn print_json(enums: &[Enum], vars: &[Constant], filter: &ConstFilter) -> Result
 
     let command = std::env::args().collect::<Vec<_>>().join(" ");
 
-    // Collect referred_components from both standalone constants and enum
-    // member constants, excluding names already present in the result set.
-    let mut seen: HashSet<String> = vars.iter().map(|c| c.get_name().to_string()).collect();
-    for e in &filtered_enums {
-        for c in e.get_constants() {
-            seen.insert(c.get_name().to_string());
-        }
-    }
+    let referred = build_referred_components(
+        vars.iter().map(|c| c.get_name().to_string()),
+        vars.iter(),
+    );
 
-    let mut referred: Vec<Value> = Vec::new();
-    for c in vars {
-        collect_component_constants(c, &mut seen, &mut referred);
-    }
-    for e in &filtered_enums {
-        for c in e.get_constants() {
-            collect_component_constants(c, &mut seen, &mut referred);
-        }
-    }
-
-    let mut output = serde_json::json!({
+    let output = serde_json::json!({
         "command": command,
         "constants": vars.to_json(),
         "enums": filtered_enums.to_json(),
+        "referred_components": referred,
     });
-
-    if !referred.is_empty() {
-        output["referred_components"] = Value::Array(referred);
-    }
 
     println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())

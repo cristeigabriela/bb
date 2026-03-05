@@ -208,6 +208,11 @@ error: no structs matching '_PBE'
 </tr>
 </table>
 
+
+### Future support
+
+Support for functions is currently in development. 
+
 ---
 
 ## Supported headers
