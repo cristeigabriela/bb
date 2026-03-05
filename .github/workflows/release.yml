@@ -1,0 +1,55 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and Release
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Get version
+        id: get_version
+        shell: pwsh
+        run: |
+          $version = (Get-Content Cargo.toml -Raw | Select-String -Pattern '(?ms)\[workspace\.package\].*?version\s*=\s*"(.*?)"').Matches.Groups[1].Value
+          "version=$version" | Add-Content -Path $env:GITHUB_OUTPUT
+
+      - name: Build all binaries
+        run: cargo build --release
+
+      - name: Package binaries
+        shell: pwsh
+        run: |
+          mkdir release_assets
+          # Find all .exe files in target/release, but skip those in deps/ and build/
+          $exes = Get-ChildItem -Path target/release/*.exe -Exclude *.pdb, *.d
+          foreach ($exe in $exes) {
+            # Check if it's in the root of target/release (not in a subdirectory)
+            if ($exe.DirectoryName -eq (Resolve-Path "target/release").Path) {
+              cp $exe.FullName "release_assets/$($exe.Name)"
+            }
+          }
+
+      - name: Create or Update Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.get_version.outputs.version }}
+          files: |
+            release_assets/*.exe
+          generate_release_notes: true
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
