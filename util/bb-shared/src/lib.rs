@@ -39,12 +39,12 @@ pub fn glob_match(input: &str, pattern: &str, case_sensitive: bool) -> bool {
         }
     }
 
-    if !pattern.ends_with('*') {
-        if let Some(last) = parts.last() {
-            if !last.is_empty() && !input.ends_with(last) {
-                return false;
-            }
-        }
+    if !pattern.ends_with('*')
+        && let Some(last) = parts.last()
+        && !last.is_empty()
+        && !input.ends_with(last)
+    {
+        return false;
     }
 
     true
