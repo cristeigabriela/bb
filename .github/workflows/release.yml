@@ -25,22 +25,21 @@ jobs:
       - name: Determine version and revision
         id: get_version
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Extract version from Cargo.toml
           $version = (Get-Content Cargo.toml -Raw | Select-String -Pattern '(?ms)\[workspace\.package\].*?version\s*=\s*"(.*?)"').Matches.Groups[1].Value
           $base_tag = "v$version"
           
-          # Fetch existing tags to check for duplicates
-          $tags = gh tag list --limit 1000
+          # Fetch existing tags using git
+          $tags = git tag
+          if ($null -eq $tags) { $tags = @() }
           
-          if ($null -eq $tags -or ($tags.Count -eq 0) -or ($tags -notcontains $base_tag)) {
+          if ($tags -notcontains $base_tag) {
               $tag = $base_tag
               $name = $base_tag
           } else {
               # Base tag exists, find the highest revision vX.Y.Z-revN
-              $rev_pattern = [regex]::Escape($base_tag) + "-rev(\d+)$"
+              $rev_pattern = "^" + [regex]::Escape($base_tag) + "-rev(\d+)$"
               $max_rev = 0
               foreach ($t in $tags) {
                   if ($t -match $rev_pattern) {
