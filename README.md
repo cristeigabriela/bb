@@ -4,9 +4,11 @@
 
 **Benowin Blanc** — Windows through a detective's lens.
 
+**(Name credits go to my beloved spouse. ꨄ︎)**
+
 A set of command-line tools that parse **Windows SDK** and **PHNT** headers via libclang
 and let you inspect what's actually in them: struct layouts, field offsets,
-enum values, constants, `#define` macros — the works.
+enum values, constants, `#define` macros, functions — the works.
 
 Think of it as `dt` from WinDbg, but you don't need a debugger running,
 and it works against any SDK version, architecture, or PHNT release you throw at it.
@@ -110,7 +112,7 @@ bb-types --struct _PEB
 **Recurse into nested types:**
 
 ```bash
-bb-types --phnt --struct PEB --depth 2
+bb-types --phnt --struct _PEB --depth 2
 ```
 
 **Search for constants by wildcard:**
@@ -211,7 +213,13 @@ error: no structs matching '_PBE'
 
 ### Future support
 
-Support for functions is currently in development. 
+Support for functions is currently in development, to be implemented with [sparse](https://github.com/cristeigabriela/sparse).
+
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/cristeigabriela/sparse/master/media/diagram.png#gh-light-mode-only" alt="A diagram illustrating the process described below." width="75%">
+  <img src="https://raw.githubusercontent.com/cristeigabriela/sparse/master/media/diagram-dark-mode.png#gh-dark-mode-only" alt="A diagram illustrating the process described below." width="75%">
+</p>
 
 ---
 
@@ -229,7 +237,6 @@ Covers **user-mode** headers (`windows.h`, `winternl.h`, `dbghelp.h`, crypto, ne
 
 ```
 bb-types --mode kernel --winsdk --struct *DRIVER_OBJECT*
-bb-types --mode kernel --struct *EPROCESS*
 ```
 
 </td>
@@ -264,7 +271,7 @@ Both tools support cross-compilation via `--arch` — inspect struct layouts for
 | `arm` | `thumbv7-pc-windows-msvc` | |
 
 ```
-bb-types --arch arm64 --struct CONTEXT
+bb-types --arch arm64 --struct _CONTEXT
 ```
 
 ---
@@ -273,7 +280,10 @@ bb-types --arch arm64 --struct CONTEXT
 
 The flow is described below:
 
-<p align="center"><img src="./media/bb-diagram.png" alt="Diagram showing the bb crate dependency flow: bb-sdk feeds into bb-clang, which branches into bb-types and bb-consts (CLI frontends), each flowing down to bb-types-tui and bb-consts-tui (TUI frontends)" width="75%"></p>
+<p align="center">
+  <img src="./media/bb-diagram.png#gh-light-mode-only" alt="Diagram showing the bb crate dependency flow: bb-sdk feeds into bb-clang, which branches into bb-types, bb-funcs bb-consts (CLI frontends), each flowing down to bb-types-tui, bb-funcs-tui and bb-consts-tui (TUI frontends)" width="75%">
+  <img src="./media/bb-diagram-dark-mode.png#gh-dark-mode-only" alt="Diagram showing the bb crate dependency flow: bb-sdk feeds into bb-clang, which branches into bb-types, bb-funcs bb-consts (CLI frontends), each flowing down to bb-types-tui, bb-funcs-tui and bb-consts-tui (TUI frontends)" width="75%">
+</p>
 
 
 We use `bb-sdk` to discover (or gather) the SDK environment, then we generate a SDK-specific "synthetic header" (also known as an `Unsaved`/`CXUnsavedFile` in the Clang-world) which will be passed through partial compilation with `libclang.dll` and in turn give us a `TranslationUnit`.
