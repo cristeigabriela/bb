@@ -54,7 +54,7 @@ fn main() -> Result<()> {
     // there can be other children like dllimport, typeref for return type, etc
     let args: Vec<Entity<'_>> = f.get_children();
     dbg!(&args);
-    let all_children_kind = iter_funcs(&tu).map(|x| x.get_children()).flatten();
+    let all_children_kind = iter_funcs(&tu).flat_map(|x| x.get_children());
     let mut ek: HashSet<clang::EntityKind> = HashSet::new();
     for entry in all_children_kind {
         if entry.get_kind() == EntityKind::DllImport {
