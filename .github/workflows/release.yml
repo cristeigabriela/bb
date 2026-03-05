@@ -1,6 +1,21 @@
-- name: Rust Build, Package and Release Action
-  uses: michaelklishin/rust-build-package-release-action@v1.24.0
-  with:
-    command: release
-    target: x86_64-pc-windows-msvc
-    archive: 'true'
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Rust Build, Package and Release Action
+        uses: michaelklishin/rust-build-package-release-action@v1.24.0
+        with:
+          command: release
+          target: x86_64-pc-windows-msvc
+          archive: 'true'
