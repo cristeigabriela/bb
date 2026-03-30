@@ -1,5 +1,6 @@
-//! Parameter declartion representation.
+//! Parameter declaration representation.
 
+use bb_arch::ParamLocation;
 use clang::{Entity, EntityKind, Type};
 use serde::Serialize;
 
@@ -20,6 +21,7 @@ pub struct Param<'a> {
     #[serde(rename = "type")]
     type_name: String,
     location: Option<SourceLocation>,
+    abi_location: ParamLocation,
 }
 
 impl<'a> Param<'a> {
@@ -52,28 +54,28 @@ impl<'a> Param<'a> {
     pub const fn get_location(&self) -> Option<&SourceLocation> {
         self.location.as_ref()
     }
+    #[must_use]
+    pub const fn get_abi_location(&self) -> &ParamLocation {
+        &self.abi_location
+    }
 
     /// Returns the underlying type of this field, resolving pointers and arrays.
     #[allow(unused)]
+    #[must_use]
     pub fn get_underlying_type(&self) -> Type<'a> {
         self.get_type().get_underlying_type()
     }
 }
 
-/* ─────────────────────────────── Conversions ────────────────────────────── */
+/* ─────────────────────────────── Construction ──────────────────────────── */
 
-impl<'a> TryFrom<Entity<'a>> for Param<'a> {
-    type Error = ParamError;
-
-    fn try_from(entity: Entity<'a>) -> Result<Self, Self::Error> {
+impl<'a> Param<'a> {
+    /// Construct a `Param` from an entity and its computed ABI location.
+    pub fn new(entity: Entity<'a>, abi_location: ParamLocation) -> Result<Self, ParamError> {
         let kind = entity.get_kind();
         if !matches!(kind, EntityKind::ParmDecl) {
             return Err(ParamError::NotParam(kind));
         }
-
-        // NOTE: it's... well... technically possible to have params with an anonymous
-        // type, but... I'm not going to over-engineer around that, as I can't think of
-        // one case where it's used in WinAPI, and it's kind of a batshit insane decision.
 
         let semantic_parent = entity
             .get_semantic_parent()
@@ -90,6 +92,7 @@ impl<'a> TryFrom<Entity<'a>> for Param<'a> {
             type_,
             type_name,
             location,
+            abi_location,
         })
     }
 }

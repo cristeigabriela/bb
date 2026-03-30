@@ -6,6 +6,7 @@ use serde_json::Value;
 
 use crate::constant::Constant;
 use crate::enum_::Enum;
+use crate::function::Function;
 use crate::struct_::Field;
 use crate::struct_::Struct;
 
@@ -55,6 +56,12 @@ impl ToJson for Enum<'_> {
 }
 
 impl ToJson for Field<'_> {
+    fn to_json(&self) -> Value {
+        serde_json::to_value(self).unwrap()
+    }
+}
+
+impl ToJson for Function<'_> {
     fn to_json(&self) -> Value {
         serde_json::to_value(self).unwrap()
     }
@@ -158,6 +165,18 @@ impl ToJson for [Field<'_>] {
 }
 
 impl ToJson for [&Field<'_>] {
+    fn to_json(&self) -> Value {
+        slice_to_json(self)
+    }
+}
+
+impl ToJson for [Function<'_>] {
+    fn to_json(&self) -> Value {
+        slice_to_json(self)
+    }
+}
+
+impl ToJson for [&Function<'_>] {
     fn to_json(&self) -> Value {
         slice_to_json(self)
     }

@@ -3,11 +3,14 @@ mod tests {
     use serial_test::serial;
 
     use anyhow::Context;
-    use bb_clang::{Enum, Struct, ToJson, build_referred_components};
+    use bb_arch::{Arch, MemoryOperand, ParamLocation, Register, ReturnLocation};
+    use bb_arch::reg::{X64Gpr, X86Gpr};
+    use bb_clang::{Enum, Function, Struct, ToJson, build_referred_components};
     use bb_consts_lib::{
         ConstFilter, build_lookup_table, collect_constants, collect_enums, filter_constants_by_name,
     };
-    use bb_sdk::{Arch, HeaderConfig, SdkMode};
+    use bb_funcs_lib::collect_funcs;
+    use bb_sdk::{HeaderConfig, SdkMode};
     use bb_types_lib::{StructFilter, collect_structs, iter_structs};
     use clang::{Clang, Index};
 
@@ -161,7 +164,7 @@ mod tests {
         // FILETIME: always 8 bytes, exactly 2 DWORD fields
         let filetime = find_struct(&structs, "_FILETIME").unwrap();
 
-        // Location: should be in guiddef.h
+        // Location: should be in minwindef.h
         let location = filetime
             .get_location()
             .ok_or_else(|| anyhow::anyhow!("FILETIME should have a source location"))?;
@@ -373,7 +376,7 @@ mod tests {
 
         // Macro constants (including composed ones) should be present
         assert!(
-            vars.iter().any(|c| c.is_macro()),
+            vars.iter().any(bb_clang::Constant::is_macro),
             "should find macro constants"
         );
 
@@ -636,7 +639,6 @@ mod tests {
         assert!(!structs.is_empty(), "_PEB must exist");
 
         let full = structs.to_json_full();
-        dbg!(&full);
         assert!(full["types"].is_array(), "should have types array");
         assert!(
             full["referenced_types"].is_array(),
@@ -840,10 +842,269 @@ mod tests {
 
         let j = max_path.to_json_full();
         assert_eq!(
-            j["referred_components"].as_array().map(|a| a.len()),
+            j["referred_components"].as_array().map(std::vec::Vec::len),
             Some(0),
             "to_json_full on a simple constant should have empty referred_components"
         );
+
+        Ok(())
+    }
+
+    /* ──────────────────────────────── Functions ───────────────────────────── */
+
+    /// Find a function by name.
+    fn find_func<'a, 'b>(funcs: &'b [Function<'a>], name: &str) -> Option<&'b Function<'a>> {
+        funcs.iter().find(|f| f.get_name() == name)
+    }
+
+    #[test]
+    #[serial]
+    fn funcs_populated_and_valid() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let funcs = collect_funcs(&tu);
+
+        assert!(
+            funcs.len() > 100,
+            "expected hundreds of functions, got {}",
+            funcs.len()
+        );
+
+        // Every function should have a name and calling convention.
+        for f in &funcs {
+            assert!(!f.get_name().is_empty(), "function should have a name");
+            assert!(
+                !f.get_return_type_name().is_empty(),
+                "function '{}' should have a return type name",
+                f.get_name()
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn well_known_functions_exist() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let funcs = collect_funcs(&tu);
+
+        let expected: &[&str] = &[
+            "CreateFileW",
+            "CloseHandle",
+            "ReadFile",
+            "WriteFile",
+            "GetLastError",
+        ];
+
+        for name in expected {
+            assert!(
+                find_func(&funcs, name).is_some(),
+                "{name} not found in parsed functions"
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn function_arch_detection_amd64() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu, Arch::Amd64, SdkMode::User);
+
+        let funcs = collect_funcs(&tu);
+        let f = find_func(&funcs, "CloseHandle")
+            .expect("CloseHandle must exist");
+
+        assert_eq!(f.get_arch(), Arch::Amd64);
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn function_arch_detection_x86() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu, Arch::X86, SdkMode::User);
+
+        let funcs = collect_funcs(&tu);
+        let f = find_func(&funcs, "CloseHandle")
+            .expect("CloseHandle must exist");
+
+        assert_eq!(f.get_arch(), Arch::X86);
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn closehandle_x64_param_in_rcx() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu, Arch::Amd64, SdkMode::User);
+
+        let funcs = collect_funcs(&tu);
+        let f = find_func(&funcs, "CloseHandle")
+            .expect("CloseHandle must exist");
+
+        // CloseHandle(HANDLE hObject) — 1 param, integer, in RCX on x64.
+        let params = f.get_params();
+        assert_eq!(params.len(), 1, "CloseHandle has exactly 1 parameter");
+
+        let p = &params[0];
+        assert_eq!(p.get_name(), Some("hObject"));
+
+        assert_eq!(
+            *p.get_abi_location(),
+            ParamLocation::Direct {
+                locations: vec![MemoryOperand::Reg(Register::X64Gpr(X64Gpr::Rcx))],
+                size: 8,
+            },
+            "CloseHandle's HANDLE param should be in RCX on x64"
+        );
+
+        // Return: BOOL → RAX
+        assert_eq!(
+            *f.get_return_location(),
+            ReturnLocation::Register(Register::X64Gpr(X64Gpr::Rax)),
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn createfilew_x64_params() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu, Arch::Amd64, SdkMode::User);
+
+        let funcs = collect_funcs(&tu);
+        let f = find_func(&funcs, "CreateFileW")
+            .expect("CreateFileW must exist");
+
+        // CreateFileW has 7 params (callee-entry RSP):
+        //   LPCWSTR lpFileName          → RCX          (pos 0)
+        //   DWORD dwDesiredAccess       → RDX          (pos 1)
+        //   DWORD dwShareMode           → R8           (pos 2)
+        //   LPSECURITY_ATTRIBUTES ...   → R9           (pos 3)
+        //   DWORD dwCreationDisposition → [RSP+0x28]   (pos 4)
+        //   DWORD dwFlagsAndAttributes  → [RSP+0x30]   (pos 5)
+        //   HANDLE hTemplateFile        → [RSP+0x38]   (pos 6)
+        let params = f.get_params();
+        assert_eq!(params.len(), 7, "CreateFileW has 7 parameters");
+
+        // First 4 in registers.
+        let expected_regs = [X64Gpr::Rcx, X64Gpr::Rdx, X64Gpr::R8, X64Gpr::R9];
+        for (i, expected_reg) in expected_regs.iter().enumerate() {
+            match &params[i].get_abi_location() {
+                ParamLocation::Direct { locations, .. } => {
+                    assert_eq!(
+                        locations[0],
+                        MemoryOperand::Reg(Register::X64Gpr(*expected_reg)),
+                        "param {i} should be in {expected_reg:?}"
+                    );
+                }
+                other => panic!("param {i} expected Direct, got {other:?}"),
+            }
+        }
+
+        // Params 4–6 on stack (callee-entry RSP).
+        // 0x08 return addr + 0x20 shadow = 0x28 base, then +8 per slot.
+        let rsp = Register::X64Gpr(X64Gpr::Rsp);
+        for (i, rsp_off) in [(4, 0x28_i64), (5, 0x30), (6, 0x38)] {
+            match &params[i].get_abi_location() {
+                ParamLocation::Direct { locations, .. } => {
+                    assert_eq!(
+                        locations[0],
+                        MemoryOperand::RegImm {
+                            base: rsp,
+                            offset: rsp_off
+                        },
+                        "param {i} should be at [RSP+{rsp_off:#x}]"
+                    );
+                }
+                other => panic!("param {i} expected Direct stack, got {other:?}"),
+            }
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn closehandle_x86_param_on_stack() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu, Arch::X86, SdkMode::User);
+
+        let funcs = collect_funcs(&tu);
+        let f = find_func(&funcs, "CloseHandle")
+            .expect("CloseHandle must exist");
+
+        let params = f.get_params();
+        assert_eq!(params.len(), 1);
+
+        // On x86 stdcall, all params on stack (callee-entry ESP).
+        // HANDLE at [ESP+0x04] (after return address).
+        let esp = Register::X86Gpr(X86Gpr::Esp);
+        match params[0].get_abi_location() {
+            ParamLocation::Direct { locations, size } => {
+                assert_eq!(
+                    locations[0],
+                    MemoryOperand::RegImm {
+                        base: esp,
+                        offset: 0x04,
+                    },
+                );
+                assert_eq!(*size, 4, "HANDLE on x86 is 4 bytes");
+            }
+            other => panic!("expected Direct stack, got {other:?}"),
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn getlasterror_void_params_rax_return() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu, Arch::Amd64, SdkMode::User);
+
+        let funcs = collect_funcs(&tu);
+        let f = find_func(&funcs, "GetLastError")
+            .expect("GetLastError must exist");
+
+        // GetLastError takes no parameters.
+        assert!(f.get_params().is_empty(), "GetLastError has no parameters");
+
+        // Returns DWORD in RAX.
+        assert_eq!(
+            *f.get_return_location(),
+            ReturnLocation::Register(Register::X64Gpr(X64Gpr::Rax)),
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn function_json_structure() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu, Arch::Amd64, SdkMode::User);
+
+        let funcs = collect_funcs(&tu);
+        let f = find_func(&funcs, "CloseHandle")
+            .expect("CloseHandle must exist");
+
+        let j = f.to_json();
+        assert_eq!(j["name"], "CloseHandle");
+        assert!(j["params"].is_array(), "should have params array");
+        assert!(j["calling_convention"].is_string(), "should have calling_convention");
+        assert!(j["return_location"].is_object() || j["return_location"].is_string(),
+            "should have return_location");
+        assert!(j["arch"].is_string(), "should have arch");
+
+        // params[0] should have abi_location
+        let p0 = &j["params"][0];
+        assert!(p0["abi_location"].is_object(), "param should have abi_location");
+
+        // Slice
+        let arr = funcs.to_json();
+        assert!(arr.is_array(), "slice to_json should produce an array");
+        assert!(arr.as_array().unwrap().len() > 100);
 
         Ok(())
     }

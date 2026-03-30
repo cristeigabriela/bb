@@ -1,23 +1,55 @@
-use std::collections::HashSet;
-
 use anyhow::Result;
-use bb_clang::Function;
-use bb_cli::get_header_config;
-use bb_funcs_lib::iter_funcs;
-use clang::{Clang, Entity, EntityKind, Index};
+use bb_clang::{Function, ToJson};
+use bb_cli::{get_header_config, print_suggestions};
+use bb_funcs_lib::{FuncFilter, collect_funcs_filtered, iter_funcs};
+use clang::{Clang, Index};
 use clap::Parser;
+use serde_json::Value;
 
 /* ─────────────────────────────────── CLI ────────────────────────────────── */
 
 #[derive(Parser, Debug)]
 #[command(
     before_help = "Benowin Blanc (bb): Windows through a detective's lens...",
-    name = "bb-consts",
-    about = "Parse Windows SDK or PHNT embedded headers and extract functions."
+    name = "bb-funcs",
+    about = "Parse Windows SDK or PHNT embedded headers and extract function declarations."
 )]
 struct Args {
     #[command(flatten)]
     shared: bb_cli::SharedArgs,
+
+    #[arg(long, help = "Output as JSON")]
+    json: bool,
+
+    #[arg(
+        short = 'H',
+        long = "filter",
+        help = "Filter by header file (e.g., processthreadsapi.h)"
+    )]
+    filter: Option<String>,
+
+    #[arg(
+        short = 'n',
+        long = "name",
+        help = "Function name pattern (supports * wildcard)"
+    )]
+    name: Option<String>,
+
+    #[arg(short = 'c', long = "case-sensitive", help = "Case-sensitive matching")]
+    case_sensitive: bool,
+
+    #[arg(
+        long = "exported",
+        help = "Show only exported (dllimport) functions"
+    )]
+    exported: bool,
+
+    #[arg(
+        short = 'd',
+        long = "detail",
+        help = "Force detailed ABI breakdown for all results (auto for single result)"
+    )]
+    detail: bool,
 }
 
 fn main() -> Result<()> {
@@ -33,39 +65,59 @@ fn main() -> Result<()> {
     // Parse headers.
     let tu = config.parse(&index, false)?;
 
-    let mut set: HashSet<clang::CallingConvention> = HashSet::new();
-    let ccs: Vec<_> = iter_funcs(&tu)
-        .filter_map(|x| x.get_type())
-        .filter_map(|x| x.get_calling_convention())
-        .collect();
-    dbg!(ccs.len());
-    for entry in ccs {
-        set.insert(entry);
+    let func_filter = FuncFilter {
+        name_pattern: args.name.clone(),
+        header_filter: args.filter.clone(),
+        case_sensitive: args.case_sensitive,
+        dllimport_only: args.exported,
+    };
+    let funcs = collect_funcs_filtered(&tu, &func_filter);
+
+    // If no function matched, try to print a suggestion.
+    if funcs.is_empty() {
+        let names: Vec<String> = iter_funcs(&tu).filter_map(|e| e.get_name()).collect();
+        print_suggestions(
+            "functions",
+            args.name.as_deref(),
+            names.iter().map(String::as_str),
+        );
     }
 
-    dbg!(&set);
+    if args.json {
+        print_json(funcs.as_slice())?;
+    } else {
+        // Auto-detail when there's exactly 1 result.
+        let detail = args.detail || funcs.len() == 1;
+        print_display(funcs.as_slice(), detail);
+    }
 
-    let mut funcs = iter_funcs(&tu);
-    let f = funcs.nth(1337).unwrap();
-    dbg!(f.get_name());
-    let t = f.get_type().unwrap();
-    dbg!(t.get_calling_convention());
+    Ok(())
+}
 
-    // there can be other children like dllimport, typeref for return type, etc
-    let args: Vec<Entity<'_>> = f.get_children();
-    dbg!(&args);
-    let all_children_kind = iter_funcs(&tu).flat_map(|x| x.get_children());
-    let mut ek: HashSet<clang::EntityKind> = HashSet::new();
-    for entry in all_children_kind {
-        if entry.get_kind() == EntityKind::DllImport {
-            dbg!(&entry);
+/* ──────────────────────────────── Printing ──────────────────────────────── */
+
+fn print_display(funcs: &[Function], detail: bool) {
+    if detail {
+        for (i, f) in funcs.iter().enumerate() {
+            print!("{}", f.display_detail());
+            if i < funcs.len() - 1 {
+                println!();
+            }
         }
-        ek.insert(entry.get_kind());
+    } else {
+        print!("{}", bb_clang::display::render_function_list(funcs));
     }
-    dbg!(&ek);
+}
 
-    let _f = Function::try_from(f).unwrap();
-    //dbg!(&f);
-
+fn print_json(funcs: &[Function]) -> anyhow::Result<()> {
+    let command = std::env::args().collect::<Vec<_>>().join(" ");
+    let mut output = serde_json::json!({
+        "functions": funcs.to_json(),
+    });
+    output
+        .as_object_mut()
+        .unwrap()
+        .insert("command".to_string(), Value::String(command));
+    println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())
 }

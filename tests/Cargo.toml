@@ -8,7 +8,9 @@ name = "bb_tests"
 path = "src/lib.rs"
 
 [dependencies]
+bb-arch.workspace = true
 bb-consts = { path = "../bb-consts" }
+bb-funcs = { path = "../bb-funcs" }
 bb-types = { path = "../bb-types" }
 bb-clang.workspace = true
 bb-sdk.workspace = true

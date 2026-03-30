@@ -1,7 +1,9 @@
 //! SDK and PHNT integration for bb.
 //!
 //! This crate provides Windows SDK and PHNT header management,
-//! including header generation and parsing utilities.
+//! including header generation and parsing utilities. Re-exports
+//! [`bb_arch::Arch`] and extends it with SDK-specific preprocessor
+//! defines via [`ArchDefines`].
 
 mod arch;
 mod config;
@@ -13,7 +15,7 @@ mod winsdk;
 pub use config::HeaderConfig;
 
 // Architecture
-pub use arch::Arch;
+pub use arch::{Arch, ArchDefines};
 
 // Parsing utilities
 pub use parser::{parse_phnt, parse_winsdk};

@@ -176,6 +176,7 @@ pub fn iter_constants<'a>(tu: &'a TranslationUnit<'a>) -> impl Iterator<Item = E
 
 /// Build a name -> value lookup table from all known constants (used for
 /// display-time composition rendering).
+#[must_use]
 pub fn build_lookup_table(enums: &[Enum], vars: &[Constant]) -> ConstLookup {
     let mut known = HashMap::new();
     for e in enums {

@@ -139,11 +139,24 @@ bb-consts --name "_MINIDUMP_TYPE::*"
 bb-types --arch arm64 --struct _CONTEXT
 ```
 
+**Inspect a function's ABI breakdown:**
+
+```bash
+bb-funcs --name CreateFileW
+```
+
+**List exported functions from a header:**
+
+```bash
+bb-funcs --name "Create*" --filter fileapi.h --exported
+```
+
 **Export as JSON for your own tooling:**
 
 ```bash
 bb-types --arch arm64 --struct _CONTEXT --json
 bb-consts --name "PROCESS_*" --json
+bb-funcs --name "Nt*" --phnt --json
 ```
 
 JSON mode in `bb-types` performs full nested type expansion, producing all matched types alongside their deduplicated `referenced_types` — regardless of the `--depth` flag.
@@ -176,6 +189,7 @@ error: no structs matching '_PBE'
 | --- | --- |
 | [`bb-types`](bb-types/) | Inspect struct and class layouts |
 | [`bb-consts`](bb-consts/) | Inspect constants, enums, and `#define` macros |
+| [`bb-funcs`](bb-funcs/) | Inspect function declarations with ABI parameter locations |
 
 </td>
 <td width="50%" valign="top">
@@ -200,7 +214,8 @@ error: no structs matching '_PBE'
 
 | Crate | What it does |
 | --- | --- |
-| [`bb-clang`](util/bb-clang/) | libclang abstractions for types and constants |
+| [`bb-arch`](util/bb-arch/) | Architecture definitions, register sets, and ABI location types |
+| [`bb-clang`](util/bb-clang/) | libclang abstractions for types, constants, and functions |
 | [`bb-sdk`](util/bb-sdk/) | Windows SDK / PHNT header management |
 | [`bb-cli`](util/bb-cli/) | Shared CLI argument definitions |
 | [`bb-tui`](util/bb-tui/) | Shared TUI framework on [`ratatui`](https://ratatui.rs/) |
@@ -213,13 +228,7 @@ error: no structs matching '_PBE'
 
 ### Future support
 
-Support for functions is currently in development, to be implemented with [sparse](https://github.com/cristeigabriela/sparse).
-
-
-<p align="center">
-  <img src="https://raw.githubusercontent.com/cristeigabriela/sparse/master/media/diagram.png#gh-light-mode-only" alt="A diagram illustrating the process described below." width="75%">
-  <img src="https://raw.githubusercontent.com/cristeigabriela/sparse/master/media/diagram-dark-mode.png#gh-dark-mode-only" alt="A diagram illustrating the process described below." width="75%">
-</p>
+Function support is implemented. Future integration with [sparse](https://github.com/cristeigabriela/sparse) is planned for deeper analysis.
 
 ---
 
@@ -261,7 +270,7 @@ bb-consts --phnt --name "STATUS_*"
 
 ## Architecture support
 
-Both tools support cross-compilation via `--arch` — inspect struct layouts for any target from any host:
+All tools support cross-compilation via `--arch` — inspect layouts and ABIs for any target from any host:
 
 | Flag | Target | Notes |
 | --- | --- | --- |

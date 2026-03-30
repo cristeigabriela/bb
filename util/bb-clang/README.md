@@ -25,6 +25,12 @@ The purpose is to take in the entity object, and lift it to a structured represe
   Moreover, we also support decomposing more complex macros into body tokens that will later be used in conjunction with [`cexpr`](https://crates.io/crates/cexpr) to parse the individual tokens that make it up, to understand how the value came to be.
   Macro constants resolved via lookup also track their **components** — the names of other constants that were substituted during evaluation (e.g., `FILE_ALL_ACCESS` tracks `STANDARD_RIGHTS_REQUIRED`, `SYNCHRONIZE`, etc.).
 
+- **[`Function`](./src/function/mod.rs)** -- A structured representation of C/C++ function declarations. Automatically detects the target architecture from the translation unit and assigns each parameter its ABI location (register or stack offset) based on the calling convention. Contains [`Param`](./src/function/param.rs)s and a [`CallConv`](./src/function/callconv.rs).
+
+- **[`Param`](./src/function/param.rs)** -- A structured representation of a function parameter declaration. Carries the parameter's type, name, and its computed **ABI location** — where the value lives at the calling convention level (e.g., `RCX`, `[RSP+0x28]`, or indirect via pointer).
+
+- **[`CallConv`](./src/function/callconv.rs)** -- Calling convention representation with ABI parameter assignment logic. Implements the Microsoft x64 calling convention, x86 cdecl/stdcall/fastcall, and determines return value placement. Stack offsets are callee-entry RSP/ESP-relative (before prologue). ARM is stubbed for future work.
+
 > **Note** — This is always subject to change, please make sure that you create your own understanding by reading the source code.
 
 ---
@@ -47,7 +53,7 @@ A core belief of `bb` is that it is meant to help others not only view the data,
 
 #### `ToJson` trait
 
-The **[`ToJson`](./src/json.rs)** trait provides structured JSON serialization for all bb-clang types (`Constant`, `Enum`, `Field`, `Struct`), with implementations for individual values, slices, and `Vec`s.
+The **[`ToJson`](./src/json.rs)** trait provides structured JSON serialization for all bb-clang types (`Constant`, `Enum`, `Field`, `Struct`, `Function`), with implementations for individual values, slices, and `Vec`s.
 
 It exposes two methods:
 

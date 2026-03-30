@@ -1,7 +1,7 @@
 //! Display rendering for bb-clang types.
 //!
 //! Provides tree-style rendering with Unicode box-drawing characters
-//! for structs, enums, and constants.
+//! for structs, enums, constants, and functions.
 
 use colored::Colorize;
 
@@ -9,10 +9,12 @@ use crate::location::SourceLocation;
 
 mod const_;
 mod enum_;
+mod function;
 mod struct_;
 
 pub use const_::render_constants;
 pub use enum_::{render_enum, render_enum_constants};
+pub use function::{render_function_detail, render_function_item, render_function_list};
 pub use struct_::render_struct;
 
 /// Render a type header line: styled name + optional type info + optional location.

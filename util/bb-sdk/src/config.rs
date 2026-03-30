@@ -2,7 +2,7 @@
 //!
 //! This module provides a high-level API for configuring and parsing Windows headers.
 
-use crate::arch::Arch;
+use crate::arch::{Arch, ArchDefines};
 use crate::parser::{parse_phnt, parse_winsdk};
 use crate::phnt::PhntVersion;
 use crate::winsdk::{SdkInfo, SdkMode, check_wdk_installed, get_sdk_info};

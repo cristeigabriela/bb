@@ -16,7 +16,7 @@ This crate also takes on the responsibility to handle versions for the provided 
 
 ## Architectures
 
-We expose multiple target architecture options for our SDKs:
+Target architectures are defined in [`bb-arch`](../bb-arch/) and re-exported here. `bb-sdk` extends them with SDK-specific preprocessor defines via the `ArchDefines` trait.
 
 `x86` | `amd64` | `arm` | `arm64`
 

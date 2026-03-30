@@ -41,7 +41,7 @@ This also works for `--enum` patterns.
 
 ---
 
-### Shared with `bb-types`
+### Shared with `bb-types` and `bb-funcs`
 
 <details>
 <summary>Expand shared arguments</summary>

@@ -95,9 +95,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
+name = "bb-arch"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "bb-clang"
 version = "0.1.0"
 dependencies = [
+ "bb-arch",
  "bb-shared",
  "cexpr",
  "clang",
@@ -172,6 +182,7 @@ name = "bb-sdk"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bb-arch",
  "bb-clang",
  "clang",
  "clap",
@@ -187,8 +198,10 @@ name = "bb-tests"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bb-arch",
  "bb-clang",
  "bb-consts",
+ "bb-funcs",
  "bb-sdk",
  "bb-types",
  "clang",

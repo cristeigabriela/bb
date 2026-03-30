@@ -198,6 +198,7 @@ impl<'a> Constant<'a> {
 
 /// Build a [`TuEntityMap`] from a translation unit, covering every
 /// `MacroDefinition`, `VarDecl`, and `EnumConstantDecl` in the TU.
+#[must_use]
 pub fn build_tu_entity_map<'tu>(tu: &'tu TranslationUnit<'tu>) -> TuEntityMap<'tu> {
     let mut map = HashMap::new();
     for e in tu.get_entity().get_children() {

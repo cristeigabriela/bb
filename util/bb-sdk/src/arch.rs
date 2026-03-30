@@ -1,28 +1,19 @@
-//! Architecture definitions for cross-compilation support.
+//! SDK-level architecture extensions.
+//!
+//! Re-exports [`bb_arch::Arch`] and adds Windows SDK-specific methods
+//! (preprocessor defines for cross-compilation).
 
-/* ────────────────────────────────── Types ───────────────────────────────── */
+pub use bb_arch::Arch;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-pub enum Arch {
-    X86,
-    Amd64,
-    Arm,
-    Arm64,
+/* ──────────────────────────── SDK extensions ────────────────────────────── */
+
+/// SDK-specific preprocessor defines for each architecture.
+pub trait ArchDefines {
+    fn defines(self) -> &'static [&'static str];
 }
 
-impl Arch {
-    #[must_use]
-    pub const fn target_triple(self) -> &'static str {
-        match self {
-            Self::X86 => "i686-pc-windows-msvc",
-            Self::Amd64 => "x86_64-pc-windows-msvc",
-            Self::Arm => "thumbv7-pc-windows-msvc",
-            Self::Arm64 => "aarch64-pc-windows-msvc",
-        }
-    }
-
-    #[must_use]
-    pub const fn defines(self) -> &'static [&'static str] {
+impl ArchDefines for Arch {
+    fn defines(self) -> &'static [&'static str] {
         match self {
             Self::X86 => &["-D_WIN32", "-D_X86_", "-D_M_IX86=600"],
             Self::Amd64 => &[

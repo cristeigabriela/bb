@@ -75,7 +75,7 @@ impl<'a> Constant<'a> {
         location: Option<SourceLocation>,
         body_tokens: Vec<MacroBodyToken>,
         components: Vec<String>,
-        component_constants: Vec<Constant<'a>>,
+        component_constants: Vec<Self>,
     ) -> Self {
         let hex = value.to_string();
         Self {
@@ -147,7 +147,7 @@ impl<'a> Constant<'a> {
     ///
     /// Used by [`ToJson::to_json_full`] to emit `referred_components`.
     #[must_use]
-    pub fn get_component_constants(&self) -> &[Constant<'a>] {
+    pub fn get_component_constants(&self) -> &[Self] {
         &self.component_constants
     }
 }

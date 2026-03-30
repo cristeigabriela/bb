@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+bb-arch.workspace = true
 bb-shared.workspace = true
 clang.workspace = true
 thiserror.workspace = true

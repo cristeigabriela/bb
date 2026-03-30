@@ -1,44 +1,46 @@
-# bb-types
+# bb-funcs
 
-> CLI application for querying and exporting `Type` entities from **Windows SDK** / **PHNT** headers.
+> CLI application for querying and exporting `Function` entities from **Windows SDK** / **PHNT** headers.
 
-`bb-types` is a CLI application dedicated to querying, and exporting, information extracted from `Type` entities with `bb-clang`, from the respective SDK (**Windows SDK**/**PHNT**) of your choice.
+`bb-funcs` is a CLI application dedicated to querying, and exporting, information extracted from `Function` entities with `bb-clang`, from the respective SDK (**Windows SDK**/**PHNT**) of your choice.
+
+Each function is parsed with full ABI awareness: the target architecture is detected from the translation unit, and every parameter is assigned its calling-convention location (register, stack offset, or indirect pointer).
 
 ---
 
 ## Arguments
 
-### Specific to `bb-types`
+### Specific to `bb-funcs`
 
 | Flag | Description |
 | --- | --- |
-| `--struct` / `-s` | Filter for the structs being searched for |
-| `--field` / `-f` | Filter for a field within a struct. Does not nest. Compatible with depth |
-| `--depth` / `-d` | Depth of inline field type expansion |
+| `--name` / `-n` | Function name pattern (supports `*` wildcard) |
 | `--filter` / `-H` | Filter your searches to a specific header |
 | `--case-sensitive` / `-c` | Case-sensitive matching |
-| `--json` | Output as JSON with full nested type expansion (ignores `--depth`) |
+| `--exported` | Show only exported (dllimport) functions |
+| `--detail` / `-d` | Force detailed ABI breakdown for all results (auto when single result) |
+| `--json` | Output as JSON |
+
+When a query matches exactly one function, the detailed ABI breakdown is shown automatically. Use `-d` to force detail mode for multiple results.
 
 ---
 
 ### Fuzzy suggestions
 
-When an exact (non-wildcard) name doesn't match anything, `bb-types` suggests close matches — catching both typos and incomplete names:
+When an exact (non-wildcard) name doesn't match anything, `bb-funcs` suggests close matches:
 
 ```bash
-bb-types --struct _PBE
-error: no structs matching '_PBE'
+bb-funcs --name CloseHandl
+error: no functions matching 'CloseHandl'
 
   did you mean?
 
-    _ABC
-    _PSP
-    _PEB
+    CloseHandle
 ```
 
 ---
 
-### Shared with `bb-consts` and `bb-funcs`
+### Shared with `bb-types` and `bb-consts`
 
 <details>
 <summary>Expand shared arguments</summary>

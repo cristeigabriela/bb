@@ -53,7 +53,7 @@ pub enum ConstantError {
 pub enum FunctionError {
     #[error("Entity is not a function: {0:?}")]
     NotFunction(EntityKind),
-    #[error("Entity does not have a nam")]
+    #[error("Entity does not have a name")]
     NoName,
     #[error("Entity does not have a type")]
     NoType,
@@ -61,6 +61,8 @@ pub enum FunctionError {
     NoReturnType,
     #[error("Entity type does not have a calling convention")]
     NoCallingConvention,
+    #[error("Unrecognized target architecture: {0}")]
+    UnknownArch(String),
     #[error("ParamError: {0}")]
     Param(#[from] ParamError),
 }
