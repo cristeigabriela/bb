@@ -9,7 +9,7 @@ mod tests {
     use bb_consts_lib::{
         ConstFilter, build_lookup_table, collect_constants, collect_enums, filter_constants_by_name,
     };
-    use bb_funcs_lib::collect_funcs;
+    use bb_funcs_lib::{FuncFilter, FuncSort, ParamCountFilter, collect_funcs, collect_funcs_filtered};
     use bb_sdk::{HeaderConfig, SdkMode};
     use bb_types_lib::{StructFilter, collect_structs, iter_structs};
     use clang::{Clang, Index};
@@ -1105,6 +1105,349 @@ mod tests {
         let arr = funcs.to_json();
         assert!(arr.is_array(), "slice to_json should produce an array");
         assert!(arr.as_array().unwrap().len() > 100);
+
+        Ok(())
+    }
+
+    /* ────────────────────────── Function filtering ────────────────────────── */
+
+    fn base_func_filter() -> FuncFilter {
+        FuncFilter {
+            name_pattern: None,
+            header_filter: Some("handleapi.h".into()),
+            case_sensitive: true,
+            dllimport_only: false,
+            param_count: None,
+            param_type_pattern: None,
+            return_type_pattern: None,
+            has_body: None,
+            sort: None,
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn filter_by_param_count_exact() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let filter = FuncFilter {
+            param_count: Some(ParamCountFilter::Exact(1)),
+            ..base_func_filter()
+        };
+        let funcs = collect_funcs_filtered(&tu, &filter);
+
+        assert!(!funcs.is_empty(), "should find 1-param functions in handleapi.h");
+        for f in &funcs {
+            assert_eq!(
+                f.get_params().len(),
+                1,
+                "'{}' should have exactly 1 param",
+                f.get_name()
+            );
+        }
+        assert!(
+            find_func(&funcs, "CloseHandle").is_some(),
+            "CloseHandle has 1 param"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn filter_by_param_count_range() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let filter = FuncFilter {
+            param_count: Some(ParamCountFilter::Range { min: 5, max: None }),
+            ..base_func_filter()
+        };
+        let funcs = collect_funcs_filtered(&tu, &filter);
+
+        for f in &funcs {
+            assert!(
+                f.get_params().len() >= 5,
+                "'{}' has {} params, expected >= 5",
+                f.get_name(),
+                f.get_params().len()
+            );
+        }
+        assert!(
+            find_func(&funcs, "DuplicateHandle").is_some(),
+            "DuplicateHandle has 7 params"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn filter_by_param_type_positional() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        // First param must be HANDLE
+        let filter = FuncFilter {
+            param_type_pattern: Some("HANDLE".into()),
+            ..base_func_filter()
+        };
+        let funcs = collect_funcs_filtered(&tu, &filter);
+
+        assert!(!funcs.is_empty(), "should find functions with HANDLE as first param");
+        for f in &funcs {
+            assert_eq!(
+                f.get_params()[0].get_type_name(),
+                "HANDLE",
+                "'{}' first param should be HANDLE",
+                f.get_name()
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn filter_by_param_type_positional_skip() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        // 4th param (index 3) must be LPHANDLE, using explicit _ slots.
+        // Trailing ... because DuplicateHandle has 7 params.
+        let filter = FuncFilter {
+            param_type_pattern: Some("_,_,_,LPHANDLE,...".into()),
+            ..base_func_filter()
+        };
+        let funcs = collect_funcs_filtered(&tu, &filter);
+
+        assert_eq!(funcs.len(), 1, "only DuplicateHandle has LPHANDLE at position 3");
+        assert_eq!(funcs[0].get_name(), "DuplicateHandle");
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn filter_by_param_type_floating() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        // ...,LPHANDLE → LPHANDLE at any position.
+        let filter = FuncFilter {
+            param_type_pattern: Some("...,LPHANDLE,...".into()),
+            ..base_func_filter()
+        };
+        let funcs = collect_funcs_filtered(&tu, &filter);
+
+        assert!(
+            find_func(&funcs, "DuplicateHandle").is_some(),
+            "DuplicateHandle has LPHANDLE at position 3"
+        );
+        for f in &funcs {
+            assert!(
+                f.get_params().iter().any(|p| p.get_type_name() == "LPHANDLE"),
+                "'{}' should have an LPHANDLE param",
+                f.get_name()
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn filter_by_param_type_floating_pair() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        // ...,HANDLE,HANDLE,... → consecutive HANDLE pair at any position.
+        let filter = FuncFilter {
+            param_type_pattern: Some("...,HANDLE,HANDLE,...".into()),
+            ..base_func_filter()
+        };
+        let funcs = collect_funcs_filtered(&tu, &filter);
+
+        assert!(
+            find_func(&funcs, "DuplicateHandle").is_some(),
+            "DuplicateHandle has HANDLE,HANDLE,HANDLE at positions 0-2"
+        );
+        assert!(
+            find_func(&funcs, "CompareObjectHandles").is_some(),
+            "CompareObjectHandles has HANDLE,HANDLE at positions 0-1"
+        );
+        assert!(
+            find_func(&funcs, "CloseHandle").is_none(),
+            "CloseHandle has only 1 param, can't match HANDLE,HANDLE"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn filter_by_param_type_open_tail() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        // HANDLE,... → HANDLE at position 0, any trailing params OK.
+        let filter = FuncFilter {
+            param_type_pattern: Some("HANDLE,...".into()),
+            ..base_func_filter()
+        };
+        let funcs = collect_funcs_filtered(&tu, &filter);
+
+        assert!(
+            find_func(&funcs, "CloseHandle").is_some(),
+            "CloseHandle(HANDLE) matches — open tail allows 0 trailing"
+        );
+        assert!(
+            find_func(&funcs, "DuplicateHandle").is_some(),
+            "DuplicateHandle(HANDLE, ...) matches"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn filter_by_param_type_middle_gap() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        // HANDLE,...,DWORD,... → HANDLE at 0, then DWORD at some later position.
+        let filter = FuncFilter {
+            param_type_pattern: Some("HANDLE,...,DWORD,...".into()),
+            ..base_func_filter()
+        };
+        let funcs = collect_funcs_filtered(&tu, &filter);
+
+        assert!(
+            find_func(&funcs, "SetHandleInformation").is_some(),
+            "SetHandleInformation(HANDLE, DWORD, DWORD) matches"
+        );
+        assert!(
+            find_func(&funcs, "DuplicateHandle").is_some(),
+            "DuplicateHandle(HANDLE, ..., DWORD, ...) matches"
+        );
+        assert!(
+            find_func(&funcs, "CompareObjectHandles").is_none(),
+            "CompareObjectHandles(HANDLE, HANDLE) has no DWORD"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn filter_by_return_type() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let filter = FuncFilter {
+            return_type_pattern: Some("BOOL".into()),
+            ..base_func_filter()
+        };
+        let funcs = collect_funcs_filtered(&tu, &filter);
+
+        assert!(!funcs.is_empty(), "should find BOOL-returning functions");
+        for f in &funcs {
+            assert_eq!(
+                f.get_return_type_name(),
+                "BOOL",
+                "'{}' should return BOOL",
+                f.get_name()
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn filter_by_exported() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let filter = FuncFilter {
+            dllimport_only: true,
+            ..base_func_filter()
+        };
+        let funcs = collect_funcs_filtered(&tu, &filter);
+
+        for f in &funcs {
+            assert!(
+                f.is_dllimport(),
+                "'{}' should be dllimport",
+                f.get_name()
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn sort_by_params() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let filter = FuncFilter {
+            sort: Some(FuncSort::Params),
+            dllimport_only: true,
+            ..base_func_filter()
+        };
+        let funcs = collect_funcs_filtered(&tu, &filter);
+
+        assert!(funcs.len() > 1, "need multiple functions to verify sort");
+        for w in funcs.windows(2) {
+            assert!(
+                w[0].get_params().len() <= w[1].get_params().len(),
+                "'{}' ({} params) should come before '{}' ({} params)",
+                w[0].get_name(),
+                w[0].get_params().len(),
+                w[1].get_name(),
+                w[1].get_params().len(),
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn sort_by_name() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let filter = FuncFilter {
+            sort: Some(FuncSort::Name),
+            dllimport_only: true,
+            ..base_func_filter()
+        };
+        let funcs = collect_funcs_filtered(&tu, &filter);
+
+        assert!(funcs.len() > 1, "need multiple functions to verify sort");
+        for w in funcs.windows(2) {
+            assert!(
+                w[0].get_name() <= w[1].get_name(),
+                "'{}' should come before '{}'",
+                w[0].get_name(),
+                w[1].get_name(),
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn filter_combined_param_count_and_return() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        // BOOL-returning functions with exactly 2 params in handleapi.h
+        let filter = FuncFilter {
+            param_count: Some(ParamCountFilter::Exact(2)),
+            return_type_pattern: Some("BOOL".into()),
+            dllimport_only: true,
+            ..base_func_filter()
+        };
+        let funcs = collect_funcs_filtered(&tu, &filter);
+
+        for f in &funcs {
+            assert_eq!(f.get_params().len(), 2);
+            assert_eq!(f.get_return_type_name(), "BOOL");
+            assert!(f.is_dllimport());
+        }
 
         Ok(())
     }
