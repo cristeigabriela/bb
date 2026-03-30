@@ -3,13 +3,15 @@ mod tests {
     use serial_test::serial;
 
     use anyhow::Context;
-    use bb_arch::{Arch, MemoryOperand, ParamLocation, Register, ReturnLocation};
     use bb_arch::reg::{X64Gpr, X86Gpr};
+    use bb_arch::{Arch, MemoryOperand, ParamLocation, Register, ReturnLocation};
     use bb_clang::{Enum, Function, Struct, ToJson, build_referred_components};
     use bb_consts_lib::{
         ConstFilter, build_lookup_table, collect_constants, collect_enums, filter_constants_by_name,
     };
-    use bb_funcs_lib::{FuncFilter, FuncSort, ParamCountFilter, collect_funcs, collect_funcs_filtered};
+    use bb_funcs_lib::{
+        FuncFilter, FuncSort, ParamCountFilter, collect_funcs, collect_funcs_filtered,
+    };
     use bb_sdk::{HeaderConfig, SdkMode};
     use bb_types_lib::{StructFilter, collect_structs, iter_structs};
     use clang::{Clang, Index};
@@ -914,8 +916,7 @@ mod tests {
         winsdk!(clang, index, tu, Arch::Amd64, SdkMode::User);
 
         let funcs = collect_funcs(&tu);
-        let f = find_func(&funcs, "CloseHandle")
-            .expect("CloseHandle must exist");
+        let f = find_func(&funcs, "CloseHandle").expect("CloseHandle must exist");
 
         assert_eq!(f.get_arch(), Arch::Amd64);
 
@@ -928,8 +929,7 @@ mod tests {
         winsdk!(clang, index, tu, Arch::X86, SdkMode::User);
 
         let funcs = collect_funcs(&tu);
-        let f = find_func(&funcs, "CloseHandle")
-            .expect("CloseHandle must exist");
+        let f = find_func(&funcs, "CloseHandle").expect("CloseHandle must exist");
 
         assert_eq!(f.get_arch(), Arch::X86);
 
@@ -942,8 +942,7 @@ mod tests {
         winsdk!(clang, index, tu, Arch::Amd64, SdkMode::User);
 
         let funcs = collect_funcs(&tu);
-        let f = find_func(&funcs, "CloseHandle")
-            .expect("CloseHandle must exist");
+        let f = find_func(&funcs, "CloseHandle").expect("CloseHandle must exist");
 
         // CloseHandle(HANDLE hObject) — 1 param, integer, in RCX on x64.
         let params = f.get_params();
@@ -976,8 +975,7 @@ mod tests {
         winsdk!(clang, index, tu, Arch::Amd64, SdkMode::User);
 
         let funcs = collect_funcs(&tu);
-        let f = find_func(&funcs, "CreateFileW")
-            .expect("CreateFileW must exist");
+        let f = find_func(&funcs, "CreateFileW").expect("CreateFileW must exist");
 
         // CreateFileW has 7 params (callee-entry RSP):
         //   LPCWSTR lpFileName          → RCX          (pos 0)
@@ -1033,8 +1031,7 @@ mod tests {
         winsdk!(clang, index, tu, Arch::X86, SdkMode::User);
 
         let funcs = collect_funcs(&tu);
-        let f = find_func(&funcs, "CloseHandle")
-            .expect("CloseHandle must exist");
+        let f = find_func(&funcs, "CloseHandle").expect("CloseHandle must exist");
 
         let params = f.get_params();
         assert_eq!(params.len(), 1);
@@ -1065,8 +1062,7 @@ mod tests {
         winsdk!(clang, index, tu, Arch::Amd64, SdkMode::User);
 
         let funcs = collect_funcs(&tu);
-        let f = find_func(&funcs, "GetLastError")
-            .expect("GetLastError must exist");
+        let f = find_func(&funcs, "GetLastError").expect("GetLastError must exist");
 
         // GetLastError takes no parameters.
         assert!(f.get_params().is_empty(), "GetLastError has no parameters");
@@ -1086,20 +1082,27 @@ mod tests {
         winsdk!(clang, index, tu, Arch::Amd64, SdkMode::User);
 
         let funcs = collect_funcs(&tu);
-        let f = find_func(&funcs, "CloseHandle")
-            .expect("CloseHandle must exist");
+        let f = find_func(&funcs, "CloseHandle").expect("CloseHandle must exist");
 
         let j = f.to_json();
         assert_eq!(j["name"], "CloseHandle");
         assert!(j["params"].is_array(), "should have params array");
-        assert!(j["calling_convention"].is_string(), "should have calling_convention");
-        assert!(j["return_location"].is_object() || j["return_location"].is_string(),
-            "should have return_location");
+        assert!(
+            j["calling_convention"].is_string(),
+            "should have calling_convention"
+        );
+        assert!(
+            j["return_location"].is_object() || j["return_location"].is_string(),
+            "should have return_location"
+        );
         assert!(j["arch"].is_string(), "should have arch");
 
         // params[0] should have abi_location
         let p0 = &j["params"][0];
-        assert!(p0["abi_location"].is_object(), "param should have abi_location");
+        assert!(
+            p0["abi_location"].is_object(),
+            "param should have abi_location"
+        );
 
         // Slice
         let arr = funcs.to_json();
@@ -1136,7 +1139,10 @@ mod tests {
         };
         let funcs = collect_funcs_filtered(&tu, &filter);
 
-        assert!(!funcs.is_empty(), "should find 1-param functions in handleapi.h");
+        assert!(
+            !funcs.is_empty(),
+            "should find 1-param functions in handleapi.h"
+        );
         for f in &funcs {
             assert_eq!(
                 f.get_params().len(),
@@ -1192,7 +1198,10 @@ mod tests {
         };
         let funcs = collect_funcs_filtered(&tu, &filter);
 
-        assert!(!funcs.is_empty(), "should find functions with HANDLE as first param");
+        assert!(
+            !funcs.is_empty(),
+            "should find functions with HANDLE as first param"
+        );
         for f in &funcs {
             assert_eq!(
                 f.get_params()[0].get_type_name(),
@@ -1218,7 +1227,11 @@ mod tests {
         };
         let funcs = collect_funcs_filtered(&tu, &filter);
 
-        assert_eq!(funcs.len(), 1, "only DuplicateHandle has LPHANDLE at position 3");
+        assert_eq!(
+            funcs.len(),
+            1,
+            "only DuplicateHandle has LPHANDLE at position 3"
+        );
         assert_eq!(funcs[0].get_name(), "DuplicateHandle");
 
         Ok(())
@@ -1242,7 +1255,9 @@ mod tests {
         );
         for f in &funcs {
             assert!(
-                f.get_params().iter().any(|p| p.get_type_name() == "LPHANDLE"),
+                f.get_params()
+                    .iter()
+                    .any(|p| p.get_type_name() == "LPHANDLE"),
                 "'{}' should have an LPHANDLE param",
                 f.get_name()
             );
@@ -1367,11 +1382,7 @@ mod tests {
         let funcs = collect_funcs_filtered(&tu, &filter);
 
         for f in &funcs {
-            assert!(
-                f.is_dllimport(),
-                "'{}' should be dllimport",
-                f.get_name()
-            );
+            assert!(f.is_dllimport(), "'{}' should be dllimport", f.get_name());
         }
 
         Ok(())

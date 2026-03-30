@@ -38,10 +38,7 @@ struct Args {
     #[arg(short = 'c', long = "case-sensitive", help = "Case-sensitive matching")]
     case_sensitive: bool,
 
-    #[arg(
-        long = "exported",
-        help = "Show only exported (dllimport) functions"
-    )]
+    #[arg(long = "exported", help = "Show only exported (dllimport) functions")]
     exported: bool,
 
     #[arg(

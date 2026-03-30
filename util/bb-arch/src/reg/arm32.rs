@@ -33,9 +33,5 @@ pub enum Arm32Gpr {
 /* ────────────────────────────── Param registers ────────────────────────── */
 
 /// Integer/pointer parameter registers in positional order (ARM32 AAPCS).
-pub const ARM32_INT_PARAM_REGS: [Arm32Gpr; 4] = [
-    Arm32Gpr::R0,
-    Arm32Gpr::R1,
-    Arm32Gpr::R2,
-    Arm32Gpr::R3,
-];
+pub const ARM32_INT_PARAM_REGS: [Arm32Gpr; 4] =
+    [Arm32Gpr::R0, Arm32Gpr::R1, Arm32Gpr::R2, Arm32Gpr::R3];

@@ -108,8 +108,8 @@ impl<'a> TryFrom<Entity<'a>> for Function<'a> {
 
         // Detect architecture from the translation unit's target triple.
         let target = entity.get_translation_unit().get_target();
-        let arch = Arch::from_triple(&target.triple)
-            .map_err(|e| FunctionError::UnknownArch(e.0))?;
+        let arch =
+            Arch::from_triple(&target.triple).map_err(|e| FunctionError::UnknownArch(e.0))?;
 
         let mut is_dllimport: bool = false;
         let mut has_body: bool = false;
@@ -128,9 +128,7 @@ impl<'a> TryFrom<Entity<'a>> for Function<'a> {
 
         let name = entity.get_name().ok_or(FunctionError::NoName)?;
         let type_ = entity.get_type().ok_or(FunctionError::NoType)?;
-        let return_type = type_
-            .get_result_type()
-            .ok_or(FunctionError::NoReturnType)?;
+        let return_type = type_.get_result_type().ok_or(FunctionError::NoReturnType)?;
         let return_type_name = return_type.get_display_name();
         let calling_convention = CallConv::try_from(&type_)?;
         let location = SourceLocation::from_entity(&entity);

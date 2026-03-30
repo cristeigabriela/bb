@@ -6,9 +6,9 @@
 
 use std::fmt::Write;
 
+use bb_arch::Register;
 use bb_arch::location::{MemoryOperand, ParamLocation, ReturnLocation};
 use bb_arch::reg::*;
-use bb_arch::Register;
 use colored::Colorize;
 
 use crate::function::{CallConv, Function, Param};

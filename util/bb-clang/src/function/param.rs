@@ -128,10 +128,8 @@ fn compute_abi_location(
         .filter(|e| matches!(e.get_kind(), EntityKind::ParmDecl))
         .collect();
 
-    let sibling_types: Vec<clang::Type<'_>> = siblings
-        .iter()
-        .filter_map(|e| e.get_type())
-        .collect();
+    let sibling_types: Vec<clang::Type<'_>> =
+        siblings.iter().filter_map(|e| e.get_type()).collect();
 
     let all_locations = callconv.assign_params(arch, &sibling_types);
 

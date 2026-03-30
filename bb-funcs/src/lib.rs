@@ -177,7 +177,7 @@ impl ParamCountFilter {
     pub fn contains(&self, count: usize) -> bool {
         match self {
             Self::Exact(n) => count == *n,
-            Self::Range { min, max } => count >= *min && max.map_or(true, |m| count <= m),
+            Self::Range { min, max } => count >= *min && max.is_none_or(|m| count <= m),
         }
     }
 }
@@ -378,7 +378,10 @@ mod tests {
 
     #[test]
     fn split_empty_slots() {
-        assert_eq!(split_escaped_commas(",,,HANDLE"), vec!["", "", "", "HANDLE"]);
+        assert_eq!(
+            split_escaped_commas(",,,HANDLE"),
+            vec!["", "", "", "HANDLE"]
+        );
     }
 
     #[test]

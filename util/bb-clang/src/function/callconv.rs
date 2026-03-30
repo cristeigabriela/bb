@@ -3,8 +3,7 @@
 use bb_arch::{
     Arch, MemoryOperand, ParamLocation, Register, ReturnLocation,
     reg::{
-        X64Gpr, X64Xmm, X64_FLOAT_PARAM_REGS, X64_INT_PARAM_REGS, X86Gpr,
-        X86_FASTCALL_PARAM_REGS,
+        X64_FLOAT_PARAM_REGS, X64_INT_PARAM_REGS, X64Gpr, X64Xmm, X86_FASTCALL_PARAM_REGS, X86Gpr,
     },
 };
 use clang::{Type, TypeKind};
@@ -238,14 +237,12 @@ fn assign_x64_microsoft(param_types: &[Type<'_>]) -> Vec<ParamLocation> {
                         ))],
                         size: ty.get_sizeof().unwrap_or(8),
                     },
-                    X64ParamClass::Integer | X64ParamClass::Aggregate => {
-                        ParamLocation::Direct {
-                            locations: vec![MemoryOperand::Reg(Register::X64Gpr(
-                                X64_INT_PARAM_REGS[i],
-                            ))],
-                            size: ty.get_sizeof().unwrap_or(8),
-                        }
-                    }
+                    X64ParamClass::Integer | X64ParamClass::Aggregate => ParamLocation::Direct {
+                        locations: vec![MemoryOperand::Reg(Register::X64Gpr(
+                            X64_INT_PARAM_REGS[i],
+                        ))],
+                        size: ty.get_sizeof().unwrap_or(8),
+                    },
                     X64ParamClass::IndirectAggregate(size) => ParamLocation::Indirect {
                         pointer: MemoryOperand::Reg(Register::X64Gpr(X64_INT_PARAM_REGS[i])),
                         size,
