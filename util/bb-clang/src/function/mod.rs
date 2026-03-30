@@ -111,16 +111,16 @@ impl<'a> TryFrom<Entity<'a>> for Function<'a> {
         let arch = Arch::from_triple(&target.triple)
             .map_err(|e| FunctionError::UnknownArch(e.0))?;
 
-        let mut param_entities: Vec<Entity<'a>> = Vec::new();
         let mut is_dllimport: bool = false;
         let mut has_body: bool = false;
+        let mut params: Vec<Param<'a>> = Vec::new();
 
         for entry in entity.get_children() {
             match entry.get_kind() {
                 EntityKind::DllImport => is_dllimport = true,
                 EntityKind::CompoundStmt => has_body = true,
                 EntityKind::ParmDecl => {
-                    param_entities.push(entry);
+                    params.push(Param::try_from(entry)?);
                 }
                 _ => {}
             }
@@ -137,20 +137,6 @@ impl<'a> TryFrom<Entity<'a>> for Function<'a> {
 
         // Compute return location.
         let return_location = calling_convention.return_location(arch, &return_type);
-
-        // Collect param types for ABI assignment, then build Params.
-        // Each ParmDecl must have a type — bail if any doesn't.
-        let param_types: Vec<Type<'a>> = param_entities
-            .iter()
-            .map(|e| e.get_type().ok_or(FunctionError::Param(crate::error::ParamError::NoType)))
-            .collect::<Result<Vec<_>, _>>()?;
-        let abi_locations = calling_convention.assign_params(arch, &param_types);
-
-        let params = param_entities
-            .into_iter()
-            .zip(abi_locations)
-            .map(|(e, loc)| Param::new(e, loc))
-            .collect::<Result<Vec<_>, _>>()?;
 
         Ok(Self {
             entity,

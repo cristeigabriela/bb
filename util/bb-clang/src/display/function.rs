@@ -271,8 +271,30 @@ pub fn render_function_detail(f: &Function) -> String {
     let tags = format_tags(f);
     let _ = writeln!(out, "{} {}", "│".dimmed(), tags.dimmed());
 
-    // Parameters.
+    // Stack offset note — shown when any param is on the stack.
     let params = f.get_params();
+    let has_stack_params = params.iter().any(|p| {
+        matches!(
+            p.get_abi_location(),
+            ParamLocation::Direct {
+                locations,
+                ..
+            } if locations.first().is_some_and(|l| matches!(l, MemoryOperand::RegImm { .. }))
+        )
+    });
+    if has_stack_params {
+        let _ = writeln!(
+            out,
+            "{} {}",
+            "│".dimmed(),
+            "stack offsets are callee-entry (before prologue)".bright_black(),
+        );
+    }
+
+    // Blank line before parameters.
+    let _ = writeln!(out, "{}", "│".dimmed());
+
+    // Parameters.
     if params.is_empty() {
         let _ = writeln!(out, "{} {}", "│".dimmed(), "(no parameters)".dimmed());
     } else {

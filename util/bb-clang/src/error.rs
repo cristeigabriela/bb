@@ -75,6 +75,8 @@ pub enum ParamError {
     NoSemanticParent,
     #[error("Entity does not have a type")]
     NoType,
+    #[error("Could not compute ABI location for parameter")]
+    NoAbiLocation,
 }
 
 #[derive(Debug, Error)]

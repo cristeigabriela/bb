@@ -254,7 +254,7 @@ fn assign_x64_microsoft(param_types: &[Type<'_>]) -> Vec<ParamLocation> {
             } else {
                 // Position >= 4: on the stack.
                 // 0x08 (return addr) + 0x20 (shadow) + (position - 4) * 8
-                let offset = 0x28_i64 + ((i as i64) - 4) * 8;
+                let offset = 0x28i64 + ((i as i64) - 4) * 8;
                 match class {
                     X64ParamClass::IndirectAggregate(size) => ParamLocation::Indirect {
                         pointer: MemoryOperand::RegImm { base: rsp, offset },
@@ -292,7 +292,7 @@ fn assign_x86_cdecl(param_types: &[Type<'_>]) -> Vec<ParamLocation> {
                 size,
             };
             // Align each slot to 4-byte boundary (x86 stack alignment).
-            offset += ((size + 3) & !3) as i64;
+            offset += size.next_multiple_of(4) as i64;
             loc
         })
         .collect()
