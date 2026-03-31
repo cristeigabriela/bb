@@ -1,9 +1,0 @@
-[package]
-name = "bb-arch"
-version.workspace = true
-edition.workspace = true
-
-[dependencies]
-serde.workspace = true
-clap.workspace = true
-thiserror.workspace = true

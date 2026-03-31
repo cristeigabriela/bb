@@ -1,0 +1,6 @@
+[submodule "crates/bb-sparse/sparse"]
+	path = crates/bb-sparse/sparse
+	url = https://github.com/cristeigabriela/sparse.git
+[submodule "crates/bb-sdk/phnt"]
+	path = crates/bb-sdk/phnt
+	url = https://github.com/mrexodia/phnt-single-header.git

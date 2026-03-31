@@ -9,9 +9,9 @@ path = "src/lib.rs"
 
 [dependencies]
 bb-arch.workspace = true
-bb-consts = { path = "../bb-consts" }
-bb-funcs = { path = "../bb-funcs" }
-bb-types = { path = "../bb-types" }
+bb-consts = { path = "../cli/bb-consts" }
+bb-funcs = { path = "../cli/bb-funcs" }
+bb-types = { path = "../cli/bb-types" }
 bb-clang.workspace = true
 bb-sdk.workspace = true
 clang.workspace = true

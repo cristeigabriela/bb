@@ -94,12 +94,28 @@ On a Windows host, you will need the following:
 - Visual Studio 2019/2022 **Build Tools**
 - LLVM + Clang (**libclang.dll**) version **>=18.1**
 - Rust **2024 edition**
+- Python **>=3.9** (for submodule setup)
 
 Afterwards, you may produce the binaries by invoking the following command:
 
-```bash
+```powershell
+.\update-submodules.ps1   # init + generate submodule data
 cargo build --release
 ```
+
+The project uses two submodules, managed by `update-submodules.ps1`:
+
+| Submodule | Purpose | Required for | Setup |
+| --- | --- | --- | --- |
+| **phnt** | PHNT NT header generation ([phnt-single-header](https://github.com/mrexodia/phnt-single-header)) | `--phnt` flag | `.\update-submodules.ps1 phnt` |
+| **sparse** | MSDN API metadata ([sparse](https://github.com/cristeigabriela/sparse)) | Enriched function views | `.\update-submodules.ps1 sparse` |
+
+You can update them individually or all at once (`.\update-submodules.ps1`). Both support env var overrides for custom data:
+
+| Env var | What it does |
+| --- | --- |
+| `BB_PHNT_HEADER` | Use a custom `phnt.h` instead of generating from the submodule |
+| `BB_SPARSE_JSON` | Use a pre-generated `sparse.json` instead of running the Python tool |
 
 ### First commands
 
@@ -187,9 +203,9 @@ error: no structs matching '_PBE'
 
 | Crate | What it does |
 | --- | --- |
-| [`bb-types`](bb-types/) | Inspect struct and class layouts |
-| [`bb-consts`](bb-consts/) | Inspect constants, enums, and `#define` macros |
-| [`bb-funcs`](bb-funcs/) | Inspect function declarations with ABI parameter locations |
+| [`bb-types`](cli/bb-types/) | Inspect struct and class layouts |
+| [`bb-consts`](cli/bb-consts/) | Inspect constants, enums, and `#define` macros |
+| [`bb-funcs`](cli/bb-funcs/) | Inspect function declarations with ABI parameter locations |
 
 </td>
 <td width="50%" valign="top">
@@ -198,8 +214,8 @@ error: no structs matching '_PBE'
 
 | Crate | What it does |
 | --- | --- |
-| [`bb-types-tui`](bb-types-tui/) | Interactive struct browser |
-| [`bb-consts-tui`](bb-consts-tui/) | Interactive constant browser |
+| [`bb-types-tui`](tui/bb-types-tui/) | Interactive struct browser |
+| [`bb-consts-tui`](tui/bb-consts-tui/) | Interactive constant browser |
 
 </td>
 </tr>
@@ -214,12 +230,13 @@ error: no structs matching '_PBE'
 
 | Crate | What it does |
 | --- | --- |
-| [`bb-arch`](util/bb-arch/) | Architecture definitions, register sets, and ABI location types |
-| [`bb-clang`](util/bb-clang/) | libclang abstractions for types, constants, and functions |
-| [`bb-sdk`](util/bb-sdk/) | Windows SDK / PHNT header management |
-| [`bb-cli`](util/bb-cli/) | Shared CLI argument definitions |
-| [`bb-tui`](util/bb-tui/) | Shared TUI framework on [`ratatui`](https://ratatui.rs/) |
-| [`bb-shared`](util/bb-shared/) | Small shared utilities |
+| [`bb-arch`](crates/bb-arch/) | Architecture definitions, register sets, and ABI location types |
+| [`bb-clang`](crates/bb-clang/) | libclang abstractions for types, constants, and functions |
+| [`bb-sparse`](crates/bb-sparse/) | Embedded Windows API metadata from MSDN (via [sparse](https://github.com/cristeigabriela/sparse)) |
+| [`bb-sdk`](crates/bb-sdk/) | Windows SDK / PHNT header management |
+| [`bb-cli`](crates/bb-cli/) | Shared CLI argument definitions |
+| [`bb-tui`](crates/bb-tui/) | Shared TUI framework on [`ratatui`](https://ratatui.rs/) |
+| [`bb-shared`](crates/bb-shared/) | Small shared utilities |
 
 </td>
 </tr>
@@ -290,8 +307,8 @@ bb-types --arch arm64 --struct _CONTEXT
 The flow is described below:
 
 <p align="center">
-  <img src="./media/bb-diagram.png#gh-light-mode-only" alt="Diagram showing the bb crate dependency flow: bb-sdk feeds into bb-clang, which branches into bb-types, bb-funcs bb-consts (CLI frontends), each flowing down to bb-types-tui, bb-funcs-tui and bb-consts-tui (TUI frontends)" width="75%">
-  <img src="./media/bb-diagram-dark-mode.png#gh-dark-mode-only" alt="Diagram showing the bb crate dependency flow: bb-sdk feeds into bb-clang, which branches into bb-types, bb-funcs bb-consts (CLI frontends), each flowing down to bb-types-tui, bb-funcs-tui and bb-consts-tui (TUI frontends)" width="75%">
+  <img src="./media/bb-diagram.png#gh-light-mode-only" alt="Diagram showing the bb crate dependency flow: bb-sdk feeds into bb-clang, which branches into bb-types, bb-funcs bb-consts (CLI frontends), each flowing down to bb-types-tui and bb-consts-tui (TUI frontends)" width="75%">
+  <img src="./media/bb-diagram-dark-mode.png#gh-dark-mode-only" alt="Diagram showing the bb crate dependency flow: bb-sdk feeds into bb-clang, which branches into bb-types, bb-funcs bb-consts (CLI frontends), each flowing down to bb-types-tui and bb-consts-tui (TUI frontends)" width="75%">
 </p>
 
 

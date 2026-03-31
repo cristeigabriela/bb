@@ -9,6 +9,7 @@ mod tests {
     use bb_consts_lib::{
         ConstFilter, build_lookup_table, collect_constants, collect_enums, filter_constants_by_name,
     };
+    use bb_funcs_lib::where_filter::{eval_where, parse_where};
     use bb_funcs_lib::{
         FuncFilter, FuncSort, ParamCountFilter, collect_funcs, collect_funcs_filtered,
     };
@@ -1125,6 +1126,9 @@ mod tests {
             return_type_pattern: None,
             has_body: None,
             sort: None,
+            sort_dir: bb_funcs_lib::SortDir::Asc,
+            where_clause: None,
+            first: None,
         }
     }
 
@@ -1459,6 +1463,332 @@ mod tests {
             assert_eq!(f.get_return_type_name(), "BOOL");
             assert!(f.is_dllimport());
         }
+
+        Ok(())
+    }
+
+    /* ────────────────────────── WHERE clause filter ──────────────────────── */
+
+    #[test]
+    #[serial]
+    fn where_param_count_gt() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let funcs = collect_funcs(&tu);
+        let expr = parse_where("params > 5").unwrap();
+        let filtered: Vec<_> = funcs.iter().filter(|f| eval_where(&expr, f)).collect();
+
+        assert!(
+            !filtered.is_empty(),
+            "should find functions with > 5 params"
+        );
+        for f in &filtered {
+            assert!(
+                f.get_params().len() > 5,
+                "'{}' has {} params, expected > 5",
+                f.get_name(),
+                f.get_params().len()
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn where_return_type_eq() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let filter = FuncFilter {
+            header_filter: Some("handleapi.h".into()),
+            ..base_func_filter()
+        };
+        let funcs = collect_funcs_filtered(&tu, &filter);
+        let expr = parse_where("return_type = 'BOOL'").unwrap();
+        let filtered: Vec<_> = funcs.iter().filter(|f| eval_where(&expr, f)).collect();
+
+        assert!(!filtered.is_empty());
+        for f in &filtered {
+            assert_eq!(f.get_return_type_name(), "BOOL");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn where_name_like() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let filter = FuncFilter {
+            header_filter: Some("handleapi.h".into()),
+            ..base_func_filter()
+        };
+        let funcs = collect_funcs_filtered(&tu, &filter);
+        let expr = parse_where("name LIKE '%Handle%'").unwrap();
+        let filtered: Vec<_> = funcs.iter().filter(|f| eval_where(&expr, f)).collect();
+
+        assert!(
+            filtered.len() >= 3,
+            "should find multiple *Handle* functions"
+        );
+        for f in &filtered {
+            assert!(
+                f.get_name().to_lowercase().contains("handle"),
+                "'{}' should contain 'Handle'",
+                f.get_name()
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn where_compound_and_or() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let filter = FuncFilter {
+            header_filter: Some("handleapi.h".into()),
+            ..base_func_filter()
+        };
+        let funcs = collect_funcs_filtered(&tu, &filter);
+        let expr =
+            parse_where("params > 3 AND (return_type = 'BOOL' OR return_type = 'HANDLE')").unwrap();
+        let filtered: Vec<_> = funcs.iter().filter(|f| eval_where(&expr, f)).collect();
+
+        for f in &filtered {
+            assert!(f.get_params().len() > 3);
+            assert!(
+                f.get_return_type_name() == "BOOL" || f.get_return_type_name() == "HANDLE",
+                "'{}' returns '{}', expected BOOL or HANDLE",
+                f.get_name(),
+                f.get_return_type_name()
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn where_is_exported() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let filter = FuncFilter {
+            header_filter: Some("handleapi.h".into()),
+            ..base_func_filter()
+        };
+        let funcs = collect_funcs_filtered(&tu, &filter);
+        let expr = parse_where("is_exported = true").unwrap();
+        let filtered: Vec<_> = funcs.iter().filter(|f| eval_where(&expr, f)).collect();
+
+        for f in &filtered {
+            assert!(f.is_dllimport(), "'{}' should be exported", f.get_name());
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn where_between() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let funcs = collect_funcs(&tu);
+        let expr = parse_where("params BETWEEN 2 AND 4").unwrap();
+        let filtered: Vec<_> = funcs.iter().filter(|f| eval_where(&expr, f)).collect();
+
+        assert!(!filtered.is_empty());
+        for f in &filtered {
+            let n = f.get_params().len();
+            assert!(
+                (2..=4).contains(&n),
+                "'{}' has {} params, expected 2..=4",
+                f.get_name(),
+                n
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn where_in_list() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let filter = FuncFilter {
+            header_filter: Some("handleapi.h".into()),
+            ..base_func_filter()
+        };
+        let funcs = collect_funcs_filtered(&tu, &filter);
+        let expr = parse_where("name IN ('CloseHandle', 'DuplicateHandle')").unwrap();
+        let filtered: Vec<_> = funcs.iter().filter(|f| eval_where(&expr, f)).collect();
+
+        assert_eq!(filtered.len(), 2);
+        assert!(filtered.iter().any(|f| f.get_name() == "CloseHandle"));
+        assert!(filtered.iter().any(|f| f.get_name() == "DuplicateHandle"));
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn where_not_negation() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let filter = FuncFilter {
+            header_filter: Some("handleapi.h".into()),
+            ..base_func_filter()
+        };
+        let funcs = collect_funcs_filtered(&tu, &filter);
+        let all_count = funcs.len();
+        let expr = parse_where("NOT name LIKE '%Close%'").unwrap();
+        let filtered: Vec<_> = funcs.iter().filter(|f| eval_where(&expr, f)).collect();
+
+        assert!(filtered.len() < all_count);
+        for f in &filtered {
+            assert!(
+                !f.get_name().to_lowercase().contains("close"),
+                "'{}' should not contain 'close' (case-insensitive)",
+                f.get_name()
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn where_header_filter() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let funcs = collect_funcs(&tu);
+        let expr = parse_where("header = 'handleapi.h'").unwrap();
+        let filtered: Vec<_> = funcs.iter().filter(|f| eval_where(&expr, f)).collect();
+
+        assert!(!filtered.is_empty());
+        for f in &filtered {
+            let file = f
+                .get_location()
+                .and_then(|l| l.file.clone())
+                .unwrap_or_default();
+            assert_eq!(
+                file.to_lowercase(),
+                "handleapi.h",
+                "'{}' should be in handleapi.h",
+                f.get_name()
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn where_invalid_sql_returns_err() {
+        assert!(parse_where("???invalid!!!").is_err());
+        assert!(parse_where("").is_err());
+    }
+
+    /* ─────────────────────── Sort keys (stack/param) ───────────────────── */
+
+    #[test]
+    #[serial]
+    fn sort_by_stack_size() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let filter = FuncFilter {
+            sort: Some(FuncSort::StackSize),
+            dllimport_only: true,
+            ..base_func_filter()
+        };
+        let funcs = collect_funcs_filtered(&tu, &filter);
+
+        assert!(funcs.len() > 1);
+        let sizes: Vec<usize> = funcs
+            .iter()
+            .map(|f| {
+                f.get_params()
+                    .iter()
+                    .filter_map(|p| match p.get_abi_location() {
+                        ParamLocation::Direct { locations, size }
+                            if locations
+                                .first()
+                                .is_some_and(|l| matches!(l, MemoryOperand::RegImm { .. })) =>
+                        {
+                            Some(*size)
+                        }
+                        _ => None,
+                    })
+                    .sum()
+            })
+            .collect();
+
+        for w in sizes.windows(2) {
+            assert!(w[0] <= w[1], "stack sizes should be ascending");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn sort_max_stack_param_desc() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu, Arch::X86, SdkMode::User);
+
+        let filter = FuncFilter {
+            header_filter: Some("fileapi.h".into()),
+            sort: Some(FuncSort::MaxStackParam),
+            sort_dir: bb_funcs_lib::SortDir::Desc,
+            dllimport_only: true,
+            ..base_func_filter()
+        };
+        let funcs = collect_funcs_filtered(&tu, &filter);
+
+        assert!(funcs.len() > 1);
+        let sizes: Vec<usize> = funcs
+            .iter()
+            .map(|f| {
+                f.get_params()
+                    .iter()
+                    .filter_map(|p| match p.get_abi_location() {
+                        ParamLocation::Direct { locations, size }
+                            if locations
+                                .first()
+                                .is_some_and(|l| matches!(l, MemoryOperand::RegImm { .. })) =>
+                        {
+                            Some(*size)
+                        }
+                        _ => None,
+                    })
+                    .max()
+                    .unwrap_or(0)
+            })
+            .collect();
+
+        for w in sizes.windows(2) {
+            assert!(w[0] >= w[1], "max stack param sizes should be descending");
+        }
+
+        Ok(())
+    }
+
+    /* ──────────────────────────── --first limit ────────────────────────── */
+
+    #[test]
+    #[serial]
+    fn first_limits_results() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let all = collect_funcs(&tu);
+        assert!(all.len() > 10, "should have many functions");
+
+        // Simulate --first 3 by truncating.
+        let mut limited = all;
+        limited.truncate(3);
+        assert_eq!(limited.len(), 3);
 
         Ok(())
     }

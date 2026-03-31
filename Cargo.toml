@@ -1,5 +1,22 @@
 [workspace]
-members = ["tests", "bb-types", "util/bb-arch", "util/bb-clang", "util/bb-shared", "util/bb-sdk", "util/bb-cli", "util/bb-tui", "bb-consts", "bb-consts-tui", "bb-types-tui", "bb-funcs"]
+members = [
+    "tests",
+    # Libraries
+    "crates/bb-arch",
+    "crates/bb-clang",
+    "crates/bb-shared",
+    "crates/bb-sdk",
+    "crates/bb-sparse",
+    "crates/bb-cli",
+    "crates/bb-tui",
+    # CLI binaries
+    "cli/bb-types",
+    "cli/bb-consts",
+    "cli/bb-funcs",
+    # TUI binaries
+    "tui/bb-types-tui",
+    "tui/bb-consts-tui",
+]
 resolver = "3"
 
 [workspace.package]
@@ -14,12 +31,13 @@ keywords = ["windows", "cli", "tui", "parser"]
 categories = ["command-line-utilities", "development-tools", "parsing-tools"]
 
 [workspace.dependencies]
-bb-arch = { path = "util/bb-arch" }
-bb-clang = { path = "util/bb-clang" }
-bb-shared = { path = "util/bb-shared" }
-bb-sdk = { path = "util/bb-sdk" }
-bb-cli = { path = "util/bb-cli" }
-bb-tui = { path = "util/bb-tui" }
+bb-arch = { path = "crates/bb-arch" }
+bb-clang = { path = "crates/bb-clang" }
+bb-sparse = { path = "crates/bb-sparse" }
+bb-shared = { path = "crates/bb-shared" }
+bb-sdk = { path = "crates/bb-sdk" }
+bb-cli = { path = "crates/bb-cli" }
+bb-tui = { path = "crates/bb-tui" }
 
 clang = { version = "2.0.0", features = ["clang_10_0"] }
 clap = { version = "4", features = ["derive"] }
@@ -29,5 +47,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 colored = "2"
 cexpr = "0.6.0"
+comfy-table = "7"
+sqlparser = "0.61"
+terminal_size = "0.4"
+flate2 = "1"
 ratatui = "0.30.0"
 serial_test = "3.2.0"
