@@ -5,7 +5,7 @@ use std::process::Command;
 
 /* ────────────────────────────────── Main ────────────────────────────────── */
 
-/// Resolve and copy the PHNT header to OUT_DIR for `include_str!`.
+/// Resolve and copy the PHNT header to `OUT_DIR` for `include_str!`.
 ///
 /// Resolution order:
 /// 1. `BB_PHNT_HEADER` env var → explicit custom header path
@@ -50,19 +50,17 @@ fn main() {
         run_or_warn(
             Command::new("git")
                 .args(["submodule", "update", "--init", "crates/bb-sdk/phnt"])
-                .current_dir(find_workspace_root().unwrap_or(manifest_dir.clone())),
+                .current_dir(find_workspace_root().unwrap_or(manifest_dir)),
             "git submodule init for phnt",
         );
     }
 
-    if !amalgamate_py.exists() {
-        panic!(
+    assert!(amalgamate_py.exists(), 
             "bb-sdk: phnt submodule not found at {}\n\
              hint: run `git submodule update --init crates/bb-sdk/phnt`\n\
              or set BB_PHNT_HEADER to a custom phnt.h path",
             phnt_dir.display()
         );
-    }
 
     // If the generated output already exists and is up-to-date, reuse it.
     let si_dir = phnt_dir.join("systeminformer");

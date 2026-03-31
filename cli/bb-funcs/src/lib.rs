@@ -337,7 +337,7 @@ impl FuncFilter {
         f.get_params()
             .iter()
             .filter(|p| p.is_stack())
-            .map(|p| p.size())
+            .map(bb_clang::Param::size)
             .sum()
     }
 
@@ -346,7 +346,7 @@ impl FuncFilter {
         f.get_params()
             .iter()
             .filter(|p| p.is_stack())
-            .map(|p| p.size())
+            .map(bb_clang::Param::size)
             .max()
             .unwrap_or(0)
     }

@@ -52,7 +52,7 @@ pub fn format_return_location(loc: &ReturnLocation) -> String {
 }
 
 #[must_use]
-pub fn format_callconv(cc: &CallConv) -> &'static str {
+pub const fn format_callconv(cc: &CallConv) -> &'static str {
     match cc {
         CallConv::Cdecl => "cdecl",
         CallConv::Stdcall => "stdcall",
@@ -61,7 +61,7 @@ pub fn format_callconv(cc: &CallConv) -> &'static str {
 }
 
 #[must_use]
-pub fn format_arch(arch: bb_arch::Arch) -> &'static str {
+pub const fn format_arch(arch: bb_arch::Arch) -> &'static str {
     match arch {
         bb_arch::Arch::Amd64 => "x64",
         bb_arch::Arch::X86 => "x86",

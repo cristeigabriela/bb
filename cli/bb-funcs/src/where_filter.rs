@@ -66,7 +66,7 @@ enum Val {
 }
 
 impl Val {
-    fn as_bool(&self) -> bool {
+    const fn as_bool(&self) -> bool {
         match self {
             Self::Bool(b) => *b,
             Self::Int(n) => *n != 0,
@@ -120,7 +120,7 @@ fn stack_param_bytes(f: &Function) -> usize {
     f.get_params()
         .iter()
         .filter(|p| p.is_stack())
-        .map(|p| p.size())
+        .map(bb_clang::Param::size)
         .sum()
 }
 
@@ -228,9 +228,9 @@ fn eval_binop(lhs: &Val, op: &BinaryOperator, rhs: &Val) -> Val {
         BinaryOperator::Eq => Val::Bool(vals_eq(lhs, rhs)),
         BinaryOperator::NotEq => Val::Bool(!vals_eq(lhs, rhs)),
 
-        BinaryOperator::Lt => Val::Bool(vals_cmp(lhs, rhs).is_some_and(|c| c.is_lt())),
+        BinaryOperator::Lt => Val::Bool(vals_cmp(lhs, rhs).is_some_and(std::cmp::Ordering::is_lt)),
         BinaryOperator::LtEq => Val::Bool(vals_cmp(lhs, rhs).is_some_and(|c| !c.is_gt())),
-        BinaryOperator::Gt => Val::Bool(vals_cmp(lhs, rhs).is_some_and(|c| c.is_gt())),
+        BinaryOperator::Gt => Val::Bool(vals_cmp(lhs, rhs).is_some_and(std::cmp::Ordering::is_gt)),
         BinaryOperator::GtEq => Val::Bool(vals_cmp(lhs, rhs).is_some_and(|c| !c.is_lt())),
 
         _ => Val::Null,

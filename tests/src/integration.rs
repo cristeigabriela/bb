@@ -845,7 +845,7 @@ mod tests {
 
         let j = max_path.to_json_full();
         assert_eq!(
-            j["referred_components"].as_array().map(|a| a.len()),
+            j["referred_components"].as_array().map(std::vec::Vec::len),
             Some(0),
             "to_json_full on a simple constant should have empty referred_components"
         );

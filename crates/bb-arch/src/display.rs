@@ -10,7 +10,7 @@ use crate::reg::{Arm32Gpr, Arm64Gpr, X64Gpr, X64Xmm, X86Gpr};
 
 /// Get the canonical display name for a register.
 #[must_use]
-pub fn register_name(reg: &Register) -> &'static str {
+pub const fn register_name(reg: &Register) -> &'static str {
     match reg {
         Register::X64Gpr(r) => match r {
             X64Gpr::Rax => "RAX",

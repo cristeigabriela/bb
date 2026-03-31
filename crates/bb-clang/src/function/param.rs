@@ -73,7 +73,7 @@ impl<'a> Param<'a> {
 
     /// Returns the size of this parameter in bytes.
     #[must_use]
-    pub fn size(&self) -> usize {
+    pub const fn size(&self) -> usize {
         match &self.abi_location {
             ParamLocation::Direct { size, .. } | ParamLocation::Indirect { size, .. } => *size,
         }
