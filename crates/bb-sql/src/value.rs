@@ -74,7 +74,6 @@ impl From<&serde_json::Value> for SqlValue {
                 }
             }
             serde_json::Value::String(s) => Self::Str(s.clone()),
-            serde_json::Value::Null => Self::Null,
             _ => Self::Null,
         }
     }

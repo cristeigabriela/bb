@@ -147,5 +147,6 @@ When making changes to this project, keep this file up to date:
 - If you rename files in bb-clang, update the file naming section.
 - If you add new environment variables, update the overrides table.
 - If you change the submodule setup, update the submodules table.
+- After every implementation session, review this file and update any sections that have drifted from the current state.
 
 This file should always reflect the current state of the project, not its history.

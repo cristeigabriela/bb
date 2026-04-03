@@ -9,34 +9,6 @@ use serde::Serialize;
 
 use crate::ext::UnderlyingType;
 
-/* ─────────────────────────────── Helpers ──────────────────────────────── */
-
-/// Count pointer indirection depth. `int**` = 2, `int*` = 1, `int` = 0.
-fn count_pointer_depth(canonical: &Type) -> usize {
-    let mut depth = 0;
-    let mut t = *canonical;
-    while let Some(pointee) = t.get_pointee_type() {
-        depth += 1;
-        t = pointee.get_canonical_type();
-    }
-    depth
-}
-
-/// Check if the canonical type is a function pointer (pointer to FunctionProto/FunctionNoProto).
-fn is_func_ptr(canonical: &Type) -> bool {
-    canonical.get_pointee_type().is_some_and(|pointee| {
-        matches!(
-            pointee.get_canonical_type().get_kind(),
-            TypeKind::FunctionPrototype | TypeKind::FunctionNoPrototype
-        )
-    })
-}
-
-/// Serde helper: skip serializing when value is zero.
-const fn is_zero(v: &usize) -> bool {
-    *v == 0
-}
-
 /* ────────────────────────────────── Type ───────────────────────────────── */
 
 /// Extracted type metadata from a [`clang::Type`].
@@ -44,6 +16,7 @@ const fn is_zero(v: &usize) -> bool {
 /// Holds both the raw clang type (for further introspection) and the
 /// serializable properties that describe the type's nature.
 #[derive(Debug, Serialize)]
+#[allow(clippy::struct_excessive_bools)] // Each bool represents a distinct type property.
 pub struct TypeInfo<'a> {
     /// The raw clang type. Available for further introspection but
     /// skipped during serialization.
@@ -135,4 +108,33 @@ impl<'a> TypeInfo<'a> {
     pub fn get_underlying_type(&self) -> Type<'a> {
         self.type_.get_underlying_type()
     }
+}
+
+/* ─────────────────────────────── Helpers ──────────────────────────────── */
+
+/// Count pointer indirection depth. `int**` = 2, `int*` = 1, `int` = 0.
+fn count_pointer_depth(canonical: &Type) -> usize {
+    let mut depth = 0;
+    let mut t = *canonical;
+    while let Some(pointee) = t.get_pointee_type() {
+        depth += 1;
+        t = pointee.get_canonical_type();
+    }
+    depth
+}
+
+/// Check if the canonical type is a function pointer (pointer to FunctionProto/FunctionNoProto).
+fn is_func_ptr(canonical: &Type) -> bool {
+    canonical.get_pointee_type().is_some_and(|pointee| {
+        matches!(
+            pointee.get_canonical_type().get_kind(),
+            TypeKind::FunctionPrototype | TypeKind::FunctionNoPrototype
+        )
+    })
+}
+
+/// Serde helper: skip serializing when value is zero.
+#[allow(clippy::trivially_copy_pass_by_ref)] // Required by serde skip_serializing_if signature.
+const fn is_zero(v: &usize) -> bool {
+    *v == 0
 }

@@ -298,7 +298,7 @@ fn extract_expression_from_entity(entity: &Entity) -> Option<String> {
     let eq_pos = tokens.iter().position(|t| t.get_spelling() == "=")?;
     let expr_tokens: Vec<_> = tokens[eq_pos + 1..]
         .iter()
-        .map(|t| t.get_spelling())
+        .map(clang::token::Token::get_spelling)
         // Skip trailing semicolons (var decls).
         .filter(|s| s != ";")
         .collect();

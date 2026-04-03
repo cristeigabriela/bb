@@ -33,9 +33,7 @@ fn infer_columns(rows: &[Value]) -> Vec<(String, &'static str)> {
                 Value::Bool(_) => "BOOLEAN",
                 Value::Number(n) if n.is_i64() || n.is_u64() => "INTEGER",
                 Value::Number(_) => "REAL",
-                Value::String(_) => "TEXT",
-                Value::Null => "TEXT",
-                Value::Array(_) | Value::Object(_) => "TEXT",
+                _ => "TEXT",
             };
             columns.push((key.clone(), sql_type));
         }
@@ -79,6 +77,11 @@ fn json_to_param(val: &Value) -> Box<dyn rusqlite::types::ToSql> {
 /// so the output file always exists.
 ///
 /// This produces the same level of detail as `--json` output.
+///
+/// # Errors
+///
+/// Returns an error if the database cannot be opened, the table cannot be
+/// created, or any row fails to insert.
 pub fn export_json_to_sqlite(path: &Path, table: &str, rows: &[Value]) -> Result<()> {
     let columns = infer_columns(rows);
 
@@ -127,7 +130,7 @@ pub fn export_json_to_sqlite(path: &Path, table: &str, rows: &[Value]) -> Result
                 })
                 .collect();
             let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-                params.iter().map(|p| p.as_ref()).collect();
+                params.iter().map(AsRef::as_ref).collect();
             stmt.execute(param_refs.as_slice())
                 .context("failed to insert row")?;
         }

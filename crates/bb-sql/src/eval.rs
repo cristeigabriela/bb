@@ -83,7 +83,6 @@ impl<T> Evaluator<T> {
                     SqlValue::Str(s.clone())
                 }
                 Value::Boolean(b) => SqlValue::Bool(*b),
-                Value::Null => SqlValue::Null,
                 _ => SqlValue::Null,
             },
 
