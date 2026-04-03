@@ -1,4 +1,7 @@
 //! Parameter declaration representation.
+//!
+//! Each parameter embeds a [`TypeInfo`](crate::TypeInfo) for shared type
+//! classification (pointer, array, const, underlying type).
 
 use bb_arch::location::MemoryOperand;
 use bb_arch::{Arch, ParamLocation};

@@ -1,4 +1,7 @@
 //! Field type representation.
+//!
+//! Each field embeds a [`TypeInfo`](crate::TypeInfo) for shared type
+//! classification (pointer, array, const, underlying type).
 
 use crate::error::FieldError;
 use crate::ext::{AnonymousType, HasChildrenType};

@@ -1,6 +1,8 @@
-//! The unifying struct between all `bin` crates in the Benowin-Blanc project,
-//! [`SharedArgs`] is responsible with handling [`bb_sdk`] and [`bb_clang`]
-//! related responsibilities.
+//! Shared CLI infrastructure for all `bin` crates in the Benowin-Blanc project.
+//!
+//! Provides [`SharedArgs`] for header configuration, [`print_suggestions`] for
+//! did-you-mean hints, [`current_command_string`] for JSON output, and
+//! [`terminal_width`] for layout calculations.
 //!
 //! To introduce in other `clap`-based CLIs, consider the following
 //! implementation:

@@ -1,9 +1,9 @@
-//! This is a library that exposes the utilities necessary to make the
-//! [`bb-funcs`] CLI.
+//! Shared library for the `bb-funcs` CLI and future TUI.
 //!
-//! This is an architecture that trivially allows us to share code between
-//! the CLI and a future TUI, and also reduces the amount of code present
-//! in main.rs.
+//! Provides [`FuncFilter`] (pre-parse and post-parse filtering, sorting,
+//! SQL `WHERE` evaluation via `bb-sql`), [`collect_funcs_filtered`] (returns
+//! `Result` — propagates WHERE parse errors), and the [`enriched`] module
+//! for sparse metadata integration.
 
 pub mod enriched;
 pub mod where_filter;

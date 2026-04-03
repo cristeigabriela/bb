@@ -3,6 +3,10 @@
 //! This crate provides abstractions for parsing C/C++ types, constants,
 //! and functions from headers using libclang, with tree-style display
 //! rendering and ABI-aware parameter location analysis.
+//!
+//! [`TypeInfo`] is the shared type metadata struct embedded in both
+//! [`Field`] and [`Param`], providing pointer/array/const classification
+//! and underlying type resolution.
 
 mod constant;
 pub mod display;

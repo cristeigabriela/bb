@@ -14,8 +14,8 @@ The project runs on Windows only (requires MSVC build tools + libclang.dll).
 bb/
 ├── crates/              # Libraries (never produce binaries)
 │   ├── bb-arch          # Architecture enums, registers, ABI location types, JSON serialization
-│   ├── bb-clang         # libclang abstractions: Struct, Enum, Constant, Function, Param
-│   ├── bb-cli           # Shared CLI args (SharedArgs), suggestions, helpers
+│   ├── bb-clang         # libclang abstractions: Struct, Enum, Constant, Function, Param, TypeInfo
+│   ├── bb-cli           # Shared CLI args (SharedArgs), suggestions, terminal_width, helpers
 │   ├── bb-sdk           # Windows SDK + PHNT header config, parsing, architecture defines
 │   ├── bb-shared         # Tiny utilities: glob_match, levenshtein, suggest_closest
 │   ├── bb-sparse        # Embedded MSDN API metadata (compressed JSON from sparse submodule)
@@ -109,7 +109,8 @@ Tests use `serial_test` because libclang is not fully thread-safe. Integration t
 - **`bb_cli::current_command_string()`** is used by all CLIs for JSON `"command"` fields.
 - **`format_abi_param()`** in `bb-clang/display/function.rs` is the shared ABI row formatter.
 - **`format_tags()`** returns `Vec<String>` so callers can extend before joining.
-- **bb-funcs `enriched` module** owns the sparse metadata rendering. bb-clang stays generic.
+- **`TypeInfo`** in `bb-clang/type_info.rs` is the shared type metadata struct embedded (via `#[serde(flatten)]`) in both `Field` and `Param`. Constructed via `From<clang::Type>`. Exposes `underlying_type`, `is_const`, `is_volatile`, `is_restrict`, `is_pointer`, `pointer_depth`, `is_function_pointer`, `is_array`, `array_size`.
+- **bb-funcs `enriched` module** owns the sparse metadata rendering. Enriched JSON is composed by starting from `p.to_json()` / `f.to_json()` and extending with sparse metadata. bb-clang stays generic.
 - **bb-funcs `where_filter` module** evaluates SQL WHERE clauses via `bb-sql::Evaluator`.
 - **`bb_cli::terminal_width()`** is the shared terminal width helper used by all CLIs.
 - **`bb-sql`** provides a generic `Evaluator<T>` with a column resolver closure, plus `export_json_to_sqlite` for serde-based SQLite export. All CLIs support `--sqlite`.
@@ -119,10 +120,12 @@ Tests use `serial_test` because libclang is not fully thread-safe. Integration t
 | File | Contents |
 |------|----------|
 | `function/abi.rs` | Calling conventions + ABI parameter assignment engine |
-| `function/param.rs` | Param type with `is_stack()`, `size()` |
+| `function/param.rs` | Param type with `is_stack()`, `size()`, embeds `TypeInfo` |
+| `type_info.rs` | Shared `TypeInfo` struct: type classification (pointer, array, const, volatile, function pointer, underlying type) |
 | `constant/tokens.rs` | Clang ↔ cexpr token conversion |
 | `constant/macro_.rs` | Macro resolution with identifier substitution |
 | `ext.rs` | Extension traits for clang types (`UnderlyingType`, `AnonymousType`, etc.) |
+| `json.rs` | `ToJson` trait + impls for all entity types (Struct, Field, Enum, Constant, Function, Param) |
 | `display/constant.rs` | Constant rendering |
 | `display/function.rs` | Function rendering (list, detail, shared formatters) |
 
