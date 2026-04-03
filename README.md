@@ -8,14 +8,37 @@
 
 A set of command-line tools that parse **Windows SDK** and **PHNT** headers via libclang
 and let you inspect what's actually in them: struct layouts, field offsets,
-enum values, constants, `#define` macros, functions — the works.
+enum values, constants, `#define` macros, and **function declarations with full ABI breakdowns** — the works.
 
-Think of it as `dt` from WinDbg, but you don't need a debugger running,
+Think of it as `dt` + `x` from WinDbg, but you don't need a debugger running,
 and it works against any SDK version, architecture, or PHNT release you throw at it.
 
 </div>
 
 ---
+
+<br>
+
+<div align="center">
+
+### [**Try bb viewer in your browser**](https://cristeigabriela.github.io/bb-viewer/index.html)
+
+<sub><b><a href="https://github.com/cristeigabriela/bb-viewer">bb-viewer</a></b> — a vanilla TypeScript SPA built with Bun, powered by bb's JSON exports.</sub>
+
+Browse **8,000+ functions**, **5,000+ types**, and **25,000+ constants** from the Windows SDK and PHNT headers across all architectures (amd64, x86, arm64, arm) — with ABI layouts, memory visualizations, C expressions, and an interactive type graph. No install required.
+
+<table>
+<tr>
+<td width="50%"><a href="https://cristeigabriela.github.io/bb-viewer/index.html"><img src="./media/bb-viewer-home.png" alt="bb viewer dashboard" width="100%"></a></td>
+<td width="50%"><a href="https://cristeigabriela.github.io/bb-viewer/index.html#/functions/CreateFileW"><img src="./media/bb-viewer-createfilew.png" alt="CreateFileW function detail" width="100%"></a></td>
+</tr>
+<tr>
+<td align="center"><sub>Dashboard — stats, charts, top types</sub></td>
+<td align="center"><sub>CreateFileW — ABI layout, metadata, known values</sub></td>
+</tr>
+</table>
+
+</div>
 
 <br>
 
@@ -63,9 +86,9 @@ and it works against any SDK version, architecture, or PHNT release you throw at
 
 ## What is this?
 
-Windows ships with thousands of C/C++ headers (the **Windows SDK**) that define every struct, enum, constant, and macro the OS exposes. Separately, the community-maintained **PHNT** (Process Hacker NT headers) documents internal structures that Microsoft doesn't publish.
+Windows ships with thousands of C/C++ headers (the **Windows SDK**) that define every struct, enum, constant, macro, and function the OS exposes. Separately, the community-maintained **PHNT** (Process Hacker NT headers) documents internal structures and syscalls that Microsoft doesn't publish.
 
-`bb` parses these headers with **libclang** and gives you fast, searchable, pretty-printed access to all of it **(hell, even TUIs!)** — no debugger, no IDE, no digging through `.h` files by hand.
+`bb` parses these headers with **libclang** and gives you fast, searchable, pretty-printed access to all of it — struct layouts, constant values, **function ABIs with per-parameter register/stack locations**, and more **(hell, even TUIs!)** — no debugger, no IDE, no digging through `.h` files by hand.
 
 <table>
 <tr></tr>
@@ -77,7 +100,8 @@ Windows ships with thousands of C/C++ headers (the **Windows SDK**) that define 
 - Reverse-engineer Windows internals;
 - Write kernel drivers or need to check struct layouts across architectures;
 - Want a quick `dt`-style lookup without spinning up WinDbg;
-- Need to export struct/constant definitions as JSON for your own tooling;
+- Need to see exactly which register or stack slot each function parameter lands in;
+- Need to export struct/constant/function definitions as JSON or SQLite for your own tooling;
 - Are just curious about what's inside those headers!
 
 </td>
@@ -167,15 +191,26 @@ bb-funcs --name CreateFileW
 bb-funcs --name "Create*" --filter fileapi.h --exported
 ```
 
-**Export as JSON for your own tooling:**
+**Filter functions with SQL WHERE clauses:**
+
+```bash
+bb-funcs --where "params > 3 AND return_type = 'BOOL'"
+bb-funcs --where "name LIKE '%File%' AND is_exported = true"
+```
+
+**Export as JSON or SQLite for your own tooling:**
 
 ```bash
 bb-types --arch arm64 --struct _CONTEXT --json
 bb-consts --name "PROCESS_*" --json
 bb-funcs --name "Nt*" --phnt --json
+
+# or export to SQLite
+bb-funcs --name "Create*" --sqlite funcs.db
+bb-types --struct "_*" --sqlite types.db
 ```
 
-JSON mode in `bb-types` performs full nested type expansion, producing all matched types alongside their deduplicated `referenced_types` — regardless of the `--depth` flag.
+JSON mode in `bb-types` performs full nested type expansion, producing all matched types alongside their deduplicated `referenced_types` — regardless of the `--depth` flag. SQLite exports mirror the same level of detail as JSON.
 
 **Typo? Both CLIs suggest close matches:**
 
@@ -234,6 +269,7 @@ error: no structs matching '_PBE'
 | [`bb-clang`](crates/bb-clang/) | libclang abstractions for types, constants, and functions |
 | [`bb-sparse`](crates/bb-sparse/) | Embedded Windows API metadata from MSDN (via [sparse](https://github.com/cristeigabriela/sparse)) |
 | [`bb-sdk`](crates/bb-sdk/) | Windows SDK / PHNT header management |
+| [`bb-sql`](crates/bb-sql/) | SQL WHERE evaluator + SQLite export |
 | [`bb-cli`](crates/bb-cli/) | Shared CLI argument definitions |
 | [`bb-tui`](crates/bb-tui/) | Shared TUI framework on [`ratatui`](https://ratatui.rs/) |
 | [`bb-shared`](crates/bb-shared/) | Small shared utilities |
@@ -243,9 +279,11 @@ error: no structs matching '_PBE'
 </table>
 
 
-### Future support
+### Web viewer
 
-Function support is implemented. Future integration with [sparse](https://github.com/cristeigabriela/sparse) is planned for deeper analysis.
+| | What it does |
+| --- | --- |
+| [**bb-viewer**](https://github.com/cristeigabriela/bb-viewer) | [Web explorer](https://cristeigabriela.github.io/bb-viewer/index.html) for bb's JSON output — functions, types, constants, type graph |
 
 ---
 
@@ -315,5 +353,7 @@ The flow is described below:
 We use `bb-sdk` to discover (or gather) the SDK environment, then we generate a SDK-specific "synthetic header" (also known as an `Unsaved`/`CXUnsavedFile` in the Clang-world) which will be passed through partial compilation with `libclang.dll` and in turn give us a `TranslationUnit`.
 
 From the translation unit, we lift the AST entities into `bb-clang` serializable objects, and we use the information that we expose there to develop the tools.
+
+For functions, `bb-clang` computes the full ABI layout: which register or stack slot each parameter occupies, per architecture and calling convention (cdecl, stdcall, fastcall). `bb-funcs` enriches this with MSDN metadata (DLL, lib, min Windows version) from [sparse](https://github.com/cristeigabriela/sparse) and cross-references known constant values for each parameter. SQL `WHERE` clause filtering is supported via `bb-sql`.
 
 For macros specifically, `bb-consts` does a two-pass resolution: first pass evaluates simple literals and variables, second pass substitutes known constant names into unresolved macro token streams before re-evaluating. This handles things like `#define PROCESS_ALL_ACCESS (STANDARD_RIGHTS_REQUIRED | SYNCHRONIZE | 0xFFFF)`.
