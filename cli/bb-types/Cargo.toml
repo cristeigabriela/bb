@@ -16,6 +16,7 @@ bb-sdk.workspace = true
 bb-clang.workspace = true
 bb-shared.workspace = true
 bb-cli.workspace = true
+bb-sql.workspace = true
 clang.workspace = true
 clap.workspace = true
 anyhow.workspace = true

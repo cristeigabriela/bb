@@ -23,11 +23,10 @@ pub fn collect_funcs<'a>(tu: &'a TranslationUnit<'a>) -> Vec<Function<'a>> {
         .collect()
 }
 
-#[must_use]
 pub fn collect_funcs_filtered<'a>(
     tu: &'a TranslationUnit<'a>,
     filter: &FuncFilter,
-) -> Vec<Function<'a>> {
+) -> Result<Vec<Function<'a>>, String> {
     let funcs: Vec<Function<'a>> = iter_funcs(tu)
         .filter(|e| filter.matches(e))
         .filter_map(|e| Function::try_from(e).ok())
@@ -218,7 +217,7 @@ impl FromStr for ParamCountFilter {
 /* ─────────────────────────── Sort key ──────────────────────────────────── */
 
 /// Sort key for function results.
-#[derive(Debug, Clone, clap::ValueEnum)]
+#[derive(Debug, Clone, PartialEq, Eq, clap::ValueEnum)]
 pub enum FuncSort {
     /// Sort by number of parameters.
     Params,
@@ -232,7 +231,7 @@ pub enum FuncSort {
 }
 
 /// Sort direction.
-#[derive(Debug, Clone, Default, clap::ValueEnum)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, clap::ValueEnum)]
 pub enum SortDir {
     /// Ascending (smallest first).
     #[default]
@@ -260,7 +259,7 @@ pub struct FuncFilter {
     pub sort: Option<FuncSort>,
     pub sort_dir: SortDir,
 
-    // SQL WHERE clause (applied after all other filters).
+    // SQL `WHERE` clause (applied after all other filters).
     pub where_clause: Option<String>,
 
     // Limit (applied last, after sort).
@@ -294,8 +293,9 @@ impl FuncFilter {
     /* ──────────────── Post-parse (Function-level) filtering ────────────── */
 
     /// Apply all post-parse filters and sorting to collected functions.
-    #[must_use]
-    pub fn post_filter<'a>(&self, funcs: Vec<Function<'a>>) -> Vec<Function<'a>> {
+    ///
+    /// Returns `Err` if the `WHERE` clause is present but fails to parse.
+    pub fn post_filter<'a>(&self, funcs: Vec<Function<'a>>) -> Result<Vec<Function<'a>>, String> {
         let mut result: Vec<Function<'a>> = funcs
             .into_iter()
             .filter(|f| !self.dllimport_only || f.is_dllimport())
@@ -317,19 +317,18 @@ impl FuncFilter {
             }
         }
 
-        // Apply SQL WHERE clause.
+        // Apply SQL `WHERE` clause.
         if let Some(ref clause) = self.where_clause {
-            if let Ok(expr) = where_filter::parse_where(clause) {
-                result.retain(|f| where_filter::eval_where(&expr, f));
-            }
+            let expr = where_filter::parse_where(clause)?;
+            result.retain(|f| where_filter::eval_where(&expr, f));
         }
 
-        // Apply --first limit.
+        // Apply `--first` limit.
         if let Some(n) = self.first {
             result.truncate(n);
         }
 
-        result
+        Ok(result)
     }
 
     /// Total bytes of stack-passed parameters.

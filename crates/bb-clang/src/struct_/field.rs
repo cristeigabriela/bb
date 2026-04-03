@@ -3,7 +3,7 @@
 use crate::error::FieldError;
 use crate::ext::{AnonymousType, HasChildrenType, UnderlyingType};
 use crate::location::SourceLocation;
-use clang::{Entity, EntityKind, Type};
+use clang::{Entity, EntityKind, Type, TypeKind};
 use serde::Serialize;
 
 use super::Struct;
@@ -22,6 +22,16 @@ pub struct Field<'a> {
     type_: Type<'a>,
     #[serde(rename = "type")]
     type_name: Option<String>,
+    /// The resolved underlying type name after pointer/array unwrapping.
+    /// Only present when it differs from `type_name`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    underlying_type: Option<String>,
+    is_const: bool,
+    is_pointer: bool,
+    is_array: bool,
+    /// The number of elements in a fixed-size array, if applicable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    array_size: Option<usize>,
     location: Option<SourceLocation>,
     #[serde(rename = "offset_bits")]
     offset: usize,
@@ -145,6 +155,20 @@ impl<'a> TryFrom<(Entity<'a>, &Entity<'a>)> for Field<'a> {
         let anonymous_type = type_.is_anonymous().unwrap_or(false);
         let type_name = (!anonymous_type).then(|| type_.get_display_name());
 
+        let canonical = type_.get_canonical_type();
+        let is_const = type_.is_const_qualified();
+        let is_pointer = canonical.get_pointee_type().is_some();
+        let is_array = matches!(
+            canonical.get_kind(),
+            TypeKind::ConstantArray | TypeKind::IncompleteArray | TypeKind::VariableArray
+        );
+        let array_size = if is_array { canonical.get_size() } else { None };
+
+        // Compute underlying type only when it differs from the display type.
+        let underlying = type_.get_underlying_type();
+        let underlying_name = underlying.get_declaration().and_then(|d| d.get_name());
+        let underlying_type = underlying_name.filter(|u| type_name.as_ref().is_none_or(|t| t != u));
+
         let parent_type = parent.get_type().ok_or(FieldError::NoType)?;
         let offset = parent_type
             .get_offsetof(&name)
@@ -159,6 +183,11 @@ impl<'a> TryFrom<(Entity<'a>, &Entity<'a>)> for Field<'a> {
             name,
             type_,
             type_name,
+            underlying_type,
+            is_const,
+            is_pointer,
+            is_array,
+            array_size,
             location,
             offset,
             offset_bytes: offset / 8,

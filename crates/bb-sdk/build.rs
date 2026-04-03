@@ -55,12 +55,13 @@ fn main() {
         );
     }
 
-    assert!(amalgamate_py.exists(), 
-            "bb-sdk: phnt submodule not found at {}\n\
+    assert!(
+        amalgamate_py.exists(),
+        "bb-sdk: phnt submodule not found at {}\n\
              hint: run `git submodule update --init crates/bb-sdk/phnt`\n\
              or set BB_PHNT_HEADER to a custom phnt.h path",
-            phnt_dir.display()
-        );
+        phnt_dir.display()
+    );
 
     // If the generated output already exists and is up-to-date, reuse it.
     let si_dir = phnt_dir.join("systeminformer");

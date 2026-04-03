@@ -1,10 +1,12 @@
+use std::path::PathBuf;
+
 use anyhow::Result;
 use bb_clang::Function;
 use bb_clang::display::render_function_list;
 use bb_cli::{get_header_config, print_suggestions};
 use bb_funcs_lib::enriched::{
-    ConstantLookup, build_constant_lookup_from_tu, functions_to_enriched_json,
-    render_enriched_detail,
+    ConstantLookup, build_constant_lookup_from_tu, function_to_enriched_json,
+    functions_to_enriched_json, render_enriched_detail,
 };
 use bb_funcs_lib::{
     FuncFilter, FuncSort, ParamCountFilter, SortDir, collect_funcs_filtered, iter_funcs,
@@ -117,6 +119,9 @@ struct Args {
         help = "Show only the first N results (default: 1 if flag given without value)"
     )]
     first: Option<usize>,
+
+    #[arg(long = "sqlite", help = "Export results to a SQLite database file")]
+    sqlite: Option<PathBuf>,
 }
 
 fn main() -> Result<()> {
@@ -146,7 +151,7 @@ fn main() -> Result<()> {
         where_clause: args.where_clause.clone(),
         first: args.first,
     };
-    let funcs = collect_funcs_filtered(&tu, &func_filter);
+    let funcs = collect_funcs_filtered(&tu, &func_filter).map_err(|e| anyhow::anyhow!(e))?;
 
     // If no function matched, try to print a suggestion.
     if funcs.is_empty() {
@@ -168,7 +173,14 @@ fn main() -> Result<()> {
 
     let detail = args.detail || funcs.len() == 1;
 
-    if args.json {
+    if let Some(ref path) = args.sqlite {
+        let json_rows: Vec<Value> = funcs
+            .iter()
+            .map(|f| function_to_enriched_json(f, const_lookup.as_ref()))
+            .collect();
+        bb_sql::export_json_to_sqlite(path, "functions", &json_rows)?;
+        eprintln!("exported {} functions to {}", funcs.len(), path.display());
+    } else if args.json {
         print_json(funcs.as_slice(), const_lookup.as_ref())?;
     } else {
         print_display(funcs.as_slice(), detail, const_lookup.as_ref());
@@ -182,12 +194,7 @@ fn main() -> Result<()> {
 fn print_display(funcs: &[Function], detail: bool, const_lookup: Option<&ConstantLookup>) {
     if detail {
         for (i, f) in funcs.iter().enumerate() {
-            let output = if const_lookup.is_some() {
-                render_enriched_detail(f, const_lookup)
-            } else {
-                f.display_detail()
-            };
-            print!("{output}");
+            print!("{}", render_enriched_detail(f, const_lookup));
             if i < funcs.len() - 1 {
                 println!();
             }

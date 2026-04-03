@@ -1141,7 +1141,7 @@ mod tests {
             param_count: Some(ParamCountFilter::Exact(1)),
             ..base_func_filter()
         };
-        let funcs = collect_funcs_filtered(&tu, &filter);
+        let funcs = collect_funcs_filtered(&tu, &filter).map_err(anyhow::Error::msg)?;
 
         assert!(
             !funcs.is_empty(),
@@ -1172,7 +1172,7 @@ mod tests {
             param_count: Some(ParamCountFilter::Range { min: 5, max: None }),
             ..base_func_filter()
         };
-        let funcs = collect_funcs_filtered(&tu, &filter);
+        let funcs = collect_funcs_filtered(&tu, &filter).map_err(anyhow::Error::msg)?;
 
         for f in &funcs {
             assert!(
@@ -1200,7 +1200,7 @@ mod tests {
             param_type_pattern: Some("HANDLE".into()),
             ..base_func_filter()
         };
-        let funcs = collect_funcs_filtered(&tu, &filter);
+        let funcs = collect_funcs_filtered(&tu, &filter).map_err(anyhow::Error::msg)?;
 
         assert!(
             !funcs.is_empty(),
@@ -1229,7 +1229,7 @@ mod tests {
             param_type_pattern: Some("_,_,_,LPHANDLE,...".into()),
             ..base_func_filter()
         };
-        let funcs = collect_funcs_filtered(&tu, &filter);
+        let funcs = collect_funcs_filtered(&tu, &filter).map_err(anyhow::Error::msg)?;
 
         assert_eq!(
             funcs.len(),
@@ -1251,7 +1251,7 @@ mod tests {
             param_type_pattern: Some("...,LPHANDLE,...".into()),
             ..base_func_filter()
         };
-        let funcs = collect_funcs_filtered(&tu, &filter);
+        let funcs = collect_funcs_filtered(&tu, &filter).map_err(anyhow::Error::msg)?;
 
         assert!(
             find_func(&funcs, "DuplicateHandle").is_some(),
@@ -1280,7 +1280,7 @@ mod tests {
             param_type_pattern: Some("...,HANDLE,HANDLE,...".into()),
             ..base_func_filter()
         };
-        let funcs = collect_funcs_filtered(&tu, &filter);
+        let funcs = collect_funcs_filtered(&tu, &filter).map_err(anyhow::Error::msg)?;
 
         assert!(
             find_func(&funcs, "DuplicateHandle").is_some(),
@@ -1308,7 +1308,7 @@ mod tests {
             param_type_pattern: Some("HANDLE,...".into()),
             ..base_func_filter()
         };
-        let funcs = collect_funcs_filtered(&tu, &filter);
+        let funcs = collect_funcs_filtered(&tu, &filter).map_err(anyhow::Error::msg)?;
 
         assert!(
             find_func(&funcs, "CloseHandle").is_some(),
@@ -1332,7 +1332,7 @@ mod tests {
             param_type_pattern: Some("HANDLE,...,DWORD,...".into()),
             ..base_func_filter()
         };
-        let funcs = collect_funcs_filtered(&tu, &filter);
+        let funcs = collect_funcs_filtered(&tu, &filter).map_err(anyhow::Error::msg)?;
 
         assert!(
             find_func(&funcs, "SetHandleInformation").is_some(),
@@ -1359,7 +1359,7 @@ mod tests {
             return_type_pattern: Some("BOOL".into()),
             ..base_func_filter()
         };
-        let funcs = collect_funcs_filtered(&tu, &filter);
+        let funcs = collect_funcs_filtered(&tu, &filter).map_err(anyhow::Error::msg)?;
 
         assert!(!funcs.is_empty(), "should find BOOL-returning functions");
         for f in &funcs {
@@ -1383,7 +1383,7 @@ mod tests {
             dllimport_only: true,
             ..base_func_filter()
         };
-        let funcs = collect_funcs_filtered(&tu, &filter);
+        let funcs = collect_funcs_filtered(&tu, &filter).map_err(anyhow::Error::msg)?;
 
         for f in &funcs {
             assert!(f.is_dllimport(), "'{}' should be dllimport", f.get_name());
@@ -1402,7 +1402,7 @@ mod tests {
             dllimport_only: true,
             ..base_func_filter()
         };
-        let funcs = collect_funcs_filtered(&tu, &filter);
+        let funcs = collect_funcs_filtered(&tu, &filter).map_err(anyhow::Error::msg)?;
 
         assert!(funcs.len() > 1, "need multiple functions to verify sort");
         for w in funcs.windows(2) {
@@ -1429,7 +1429,7 @@ mod tests {
             dllimport_only: true,
             ..base_func_filter()
         };
-        let funcs = collect_funcs_filtered(&tu, &filter);
+        let funcs = collect_funcs_filtered(&tu, &filter).map_err(anyhow::Error::msg)?;
 
         assert!(funcs.len() > 1, "need multiple functions to verify sort");
         for w in funcs.windows(2) {
@@ -1456,7 +1456,7 @@ mod tests {
             dllimport_only: true,
             ..base_func_filter()
         };
-        let funcs = collect_funcs_filtered(&tu, &filter);
+        let funcs = collect_funcs_filtered(&tu, &filter).map_err(anyhow::Error::msg)?;
 
         for f in &funcs {
             assert_eq!(f.get_params().len(), 2);
@@ -1503,7 +1503,7 @@ mod tests {
             header_filter: Some("handleapi.h".into()),
             ..base_func_filter()
         };
-        let funcs = collect_funcs_filtered(&tu, &filter);
+        let funcs = collect_funcs_filtered(&tu, &filter).map_err(anyhow::Error::msg)?;
         let expr = parse_where("return_type = 'BOOL'").unwrap();
         let filtered: Vec<_> = funcs.iter().filter(|f| eval_where(&expr, f)).collect();
 
@@ -1524,7 +1524,7 @@ mod tests {
             header_filter: Some("handleapi.h".into()),
             ..base_func_filter()
         };
-        let funcs = collect_funcs_filtered(&tu, &filter);
+        let funcs = collect_funcs_filtered(&tu, &filter).map_err(anyhow::Error::msg)?;
         let expr = parse_where("name LIKE '%Handle%'").unwrap();
         let filtered: Vec<_> = funcs.iter().filter(|f| eval_where(&expr, f)).collect();
 
@@ -1552,7 +1552,7 @@ mod tests {
             header_filter: Some("handleapi.h".into()),
             ..base_func_filter()
         };
-        let funcs = collect_funcs_filtered(&tu, &filter);
+        let funcs = collect_funcs_filtered(&tu, &filter).map_err(anyhow::Error::msg)?;
         let expr =
             parse_where("params > 3 AND (return_type = 'BOOL' OR return_type = 'HANDLE')").unwrap();
         let filtered: Vec<_> = funcs.iter().filter(|f| eval_where(&expr, f)).collect();
@@ -1579,7 +1579,7 @@ mod tests {
             header_filter: Some("handleapi.h".into()),
             ..base_func_filter()
         };
-        let funcs = collect_funcs_filtered(&tu, &filter);
+        let funcs = collect_funcs_filtered(&tu, &filter).map_err(anyhow::Error::msg)?;
         let expr = parse_where("is_exported = true").unwrap();
         let filtered: Vec<_> = funcs.iter().filter(|f| eval_where(&expr, f)).collect();
 
@@ -1622,7 +1622,7 @@ mod tests {
             header_filter: Some("handleapi.h".into()),
             ..base_func_filter()
         };
-        let funcs = collect_funcs_filtered(&tu, &filter);
+        let funcs = collect_funcs_filtered(&tu, &filter).map_err(anyhow::Error::msg)?;
         let expr = parse_where("name IN ('CloseHandle', 'DuplicateHandle')").unwrap();
         let filtered: Vec<_> = funcs.iter().filter(|f| eval_where(&expr, f)).collect();
 
@@ -1642,7 +1642,7 @@ mod tests {
             header_filter: Some("handleapi.h".into()),
             ..base_func_filter()
         };
-        let funcs = collect_funcs_filtered(&tu, &filter);
+        let funcs = collect_funcs_filtered(&tu, &filter).map_err(anyhow::Error::msg)?;
         let all_count = funcs.len();
         let expr = parse_where("NOT name LIKE '%Close%'").unwrap();
         let filtered: Vec<_> = funcs.iter().filter(|f| eval_where(&expr, f)).collect();
@@ -1692,6 +1692,24 @@ mod tests {
         assert!(parse_where("").is_err());
     }
 
+    #[test]
+    #[serial]
+    fn where_invalid_sql_propagates_through_filter() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let filter = FuncFilter {
+            where_clause: Some("???invalid!!!".into()),
+            ..base_func_filter()
+        };
+        let result = collect_funcs_filtered(&tu, &filter);
+        assert!(
+            result.is_err(),
+            "invalid WHERE should propagate as an error, not silently return all results"
+        );
+
+        Ok(())
+    }
+
     /* ─────────────────────── Sort keys (stack/param) ───────────────────── */
 
     #[test]
@@ -1704,7 +1722,7 @@ mod tests {
             dllimport_only: true,
             ..base_func_filter()
         };
-        let funcs = collect_funcs_filtered(&tu, &filter);
+        let funcs = collect_funcs_filtered(&tu, &filter).map_err(anyhow::Error::msg)?;
 
         assert!(funcs.len() > 1);
         let sizes: Vec<usize> = funcs
@@ -1745,7 +1763,7 @@ mod tests {
             dllimport_only: true,
             ..base_func_filter()
         };
-        let funcs = collect_funcs_filtered(&tu, &filter);
+        let funcs = collect_funcs_filtered(&tu, &filter).map_err(anyhow::Error::msg)?;
 
         assert!(funcs.len() > 1);
         let sizes: Vec<usize> = funcs
@@ -1789,6 +1807,177 @@ mod tests {
         let mut limited = all;
         limited.truncate(3);
         assert_eq!(limited.len(), 3);
+
+        Ok(())
+    }
+
+    /* ──────────────── Constant expression field (issue #9) ──────────────── */
+
+    #[test]
+    #[serial]
+    fn macro_constant_has_expression() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let vars = collect_constants(&tu, &no_filter());
+
+        // MAX_PATH is a simple #define MAX_PATH 260 — the expression is just "260".
+        let max_path = vars
+            .iter()
+            .find(|c| c.get_name() == "MAX_PATH")
+            .expect("MAX_PATH must exist");
+        assert!(max_path.is_macro(), "MAX_PATH should be a macro");
+        let expr = max_path.get_expression();
+        assert!(expr.is_some(), "macro constants should have an expression");
+        assert!(!expr.unwrap().is_empty(), "expression should not be empty");
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn macro_expression_in_json() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let vars = collect_constants(&tu, &no_filter());
+        let max_path = vars
+            .iter()
+            .find(|c| c.get_name() == "MAX_PATH")
+            .expect("MAX_PATH must exist");
+
+        let j = max_path.to_json();
+        assert!(
+            j["expression"].is_string(),
+            "JSON should have expression field for macros"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn enum_constant_expression() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let enums = collect_enums(&tu, &no_filter());
+
+        // Find any enum with children — most have explicit values.
+        let enum_with_values = enums.iter().find(|e| {
+            e.get_constants()
+                .iter()
+                .any(|c| c.get_expression().is_some())
+        });
+        assert!(
+            enum_with_values.is_some(),
+            "should find at least one enum constant with an expression"
+        );
+
+        Ok(())
+    }
+
+    /* ──────────────── Field type metadata (issue #10) ─────────────────── */
+
+    #[test]
+    #[serial]
+    fn field_json_has_type_metadata() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let filter = StructFilter {
+            name_pattern: Some("_GUID".into()),
+            header_filter: None,
+            case_sensitive: true,
+        };
+        let structs = collect_structs(&tu, &filter);
+        let guid = structs
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("GUID must exist"))?;
+
+        let j = guid.to_json();
+        let fields = j["fields"].as_array().expect("should have fields");
+        assert!(!fields.is_empty());
+
+        // Every field should have the type metadata properties.
+        for field in fields {
+            assert!(
+                field["is_const"].is_boolean(),
+                "field should have is_const boolean: {field}"
+            );
+            assert!(
+                field["is_pointer"].is_boolean(),
+                "field should have is_pointer boolean: {field}"
+            );
+            assert!(
+                field["is_array"].is_boolean(),
+                "field should have is_array boolean: {field}"
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn field_array_detection() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        // _GUID has Data4[8] which is a fixed-size array.
+        let filter = StructFilter {
+            name_pattern: Some("_GUID".into()),
+            header_filter: None,
+            case_sensitive: true,
+        };
+        let structs = collect_structs(&tu, &filter);
+        let guid = structs
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("GUID must exist"))?;
+
+        let j = guid.to_json();
+        let fields = j["fields"].as_array().expect("should have fields");
+
+        let data4 = fields
+            .iter()
+            .find(|f| f["name"] == "Data4")
+            .expect("GUID should have Data4 field");
+        assert_eq!(data4["is_array"], true, "Data4 should be an array");
+        assert_eq!(data4["array_size"], 8, "Data4 should have 8 elements");
+        assert_eq!(data4["is_pointer"], false, "Data4 should not be a pointer");
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn field_pointer_detection() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu, Arch::Amd64, SdkMode::User);
+
+        // Find a struct with a pointer field. _PEB has many.
+        let filter = StructFilter {
+            name_pattern: Some("_PEB".into()),
+            header_filter: None,
+            case_sensitive: true,
+        };
+        let structs = collect_structs(&tu, &filter);
+        let peb = structs
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("PEB must exist"))?;
+
+        let j = peb.to_json();
+        let fields = j["fields"].as_array().expect("should have fields");
+
+        // PEB has pointer fields.
+        let has_pointer = fields.iter().any(|f| f["is_pointer"] == true);
+        assert!(has_pointer, "PEB should have at least one pointer field");
+
+        // Pointer fields with underlying_type show what they point to.
+        let pointer_with_underlying = fields
+            .iter()
+            .find(|f| f["is_pointer"] == true && f["underlying_type"].is_string());
+        assert!(
+            pointer_with_underlying.is_some(),
+            "should find a pointer field with underlying_type set"
+        );
 
         Ok(())
     }

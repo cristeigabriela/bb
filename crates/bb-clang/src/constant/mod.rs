@@ -51,6 +51,9 @@ pub struct Constant<'a> {
     #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
     type_name: Option<String>,
     location: Option<SourceLocation>,
+    /// The original C expression text (e.g. `(0x00000001L | 0x00000002L)`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    expression: Option<String>,
     /// Raw macro body tokens (identifier flag + spelling). Empty for non-macros.
     #[serde(skip)]
     body_tokens: Vec<MacroBodyToken>,
@@ -73,6 +76,7 @@ impl<'a> Constant<'a> {
         value: ConstValue,
         type_name: Option<String>,
         location: Option<SourceLocation>,
+        expression: Option<String>,
         body_tokens: Vec<MacroBodyToken>,
         components: Vec<String>,
         component_constants: Vec<Self>,
@@ -85,6 +89,7 @@ impl<'a> Constant<'a> {
             hex,
             type_name,
             location,
+            expression,
             body_tokens,
             components,
             component_constants,
@@ -131,6 +136,12 @@ impl<'a> Constant<'a> {
         self.location.as_ref()
     }
 
+    /// The original C expression text, if available.
+    #[must_use]
+    pub fn get_expression(&self) -> Option<&str> {
+        self.expression.as_deref()
+    }
+
     /// Raw body tokens of a macro definition (empty for non-macros).
     #[must_use]
     pub fn get_body_tokens(&self) -> &[MacroBodyToken] {
@@ -169,17 +180,23 @@ impl<'a> TryFrom<Entity<'a>> for Constant<'a> {
         let type_name = entity.get_type().map(|t| t.get_display_name());
         let location = SourceLocation::from_entity(&entity);
 
-        let (value, body_tokens) = match kind {
+        let (value, expression, body_tokens) = match kind {
             EntityKind::EnumConstantDecl => {
                 let (signed, unsigned) = entity
                     .get_enum_constant_value()
                     .ok_or(ConstantError::NotEvaluable)?;
-                (ConstValue::from_enum_constant(signed, unsigned), Vec::new())
+                let expr = extract_expression_from_entity(&entity);
+                (
+                    ConstValue::from_enum_constant(signed, unsigned),
+                    expr,
+                    Vec::new(),
+                )
             }
             EntityKind::VarDecl => {
                 let result = entity.evaluate().ok_or(ConstantError::NotEvaluable)?;
                 let value = ConstValue::from_eval(result).ok_or(ConstantError::NotEvaluable)?;
-                (value, Vec::new())
+                let expr = extract_expression_from_entity(&entity);
+                (value, expr, Vec::new())
             }
             EntityKind::MacroDefinition => {
                 if entity.is_function_like_macro() || entity.is_builtin_macro() {
@@ -195,7 +212,8 @@ impl<'a> TryFrom<Entity<'a>> for Constant<'a> {
                     .map_err(|_| ConstantError::NotEvaluable)?;
 
                 let value = ConstValue::from_cexpr(result).ok_or(ConstantError::NotEvaluable)?;
-                (value, body)
+                let expr = expression_from_body_tokens(&body);
+                (value, expr, body)
             }
             _ => return Err(ConstantError::NotConstant(kind)),
         };
@@ -208,6 +226,7 @@ impl<'a> TryFrom<Entity<'a>> for Constant<'a> {
             hex,
             type_name,
             location,
+            expression,
             body_tokens,
             components: Vec::new(),
             component_constants: Vec::new(),
@@ -227,6 +246,45 @@ fn extract_body_tokens(tokens: &[Token]) -> Vec<MacroBodyToken> {
             lit_representation: t.get_spelling(),
         })
         .collect()
+}
+
+/// Reconstruct the C expression string from macro body tokens.
+pub(crate) fn expression_from_body_tokens(tokens: &[MacroBodyToken]) -> Option<String> {
+    if tokens.is_empty() {
+        return None;
+    }
+    let expr: String = tokens
+        .iter()
+        .map(|t| t.lit_representation.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let trimmed = expr.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+/// Extract the C expression from an entity's token range (for enum constants and var decls).
+///
+/// For enum constants, skips the name and `=` prefix.
+/// For var decls, skips everything up to and including `=`.
+fn extract_expression_from_entity(entity: &Entity) -> Option<String> {
+    let range = entity.get_range()?;
+    let tokens = range.tokenize();
+    // Find the `=` separator and take everything after it.
+    let eq_pos = tokens.iter().position(|t| t.get_spelling() == "=")?;
+    let expr_tokens: Vec<_> = tokens[eq_pos + 1..]
+        .iter()
+        .map(|t| t.get_spelling())
+        // Skip trailing semicolons (var decls).
+        .filter(|s| s != ";")
+        .collect();
+    if expr_tokens.is_empty() {
+        return None;
+    }
+    Some(expr_tokens.join(" "))
 }
 
 /* ───────────────────────────── Type utilities ───────────────────────────── */

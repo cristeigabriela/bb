@@ -19,6 +19,7 @@ bb/
 │   ├── bb-sdk           # Windows SDK + PHNT header config, parsing, architecture defines
 │   ├── bb-shared         # Tiny utilities: glob_match, levenshtein, suggest_closest
 │   ├── bb-sparse        # Embedded MSDN API metadata (compressed JSON from sparse submodule)
+│   ├── bb-sql           # Generic SQL WHERE evaluator + SQLite export (rusqlite, sqlparser)
 │   └── bb-tui           # Shared TUI framework (ratatui app loop, keybinds, layout)
 ├── cli/                 # CLI binaries (each has a lib + bin)
 │   ├── bb-types         # Struct/class layout inspector
@@ -37,16 +38,18 @@ bb/
 ```
 bb-arch ← bb-clang ← bb-sdk ← bb-cli
                    ↑
-            bb-shared  bb-sparse
+            bb-shared  bb-sparse  bb-sql
                    ↓
          cli/{bb-types, bb-consts, bb-funcs}
                    ↓
          tui/{bb-types-tui, bb-consts-tui}
 ```
 
-- `bb-clang` is the core parsing library. It must NOT depend on `bb-sparse`, `bb-sdk`, or any CLI/TUI crate.
+- `bb-clang` is the core parsing library. It must NOT depend on `bb-sparse`, `bb-sdk`, `bb-sql`, or any CLI/TUI crate.
 - `bb-sparse` is a pure data crate. It must NOT depend on `bb-clang`.
+- `bb-sql` is a standalone SQL crate. It must NOT depend on `bb-clang`.
 - `bb-funcs` joins `bb-clang` + `bb-sparse` via its `enriched` module.
+- All CLIs use `bb-sql` for `--sqlite` export and (bb-funcs) `--where` filtering.
 
 ## Building
 
@@ -80,6 +83,8 @@ cargo test --workspace --verbose
 cargo test --package bb-tests -- --test-threads=1
 # or just bb-funcs unit tests:
 cargo test --package bb-funcs
+# or just bb-sql unit tests (evaluator + SQLite export):
+cargo test --package bb-sql
 ```
 
 Tests use `serial_test` because libclang is not fully thread-safe. Integration tests parse real Windows SDK headers and assert on well-known types/functions (e.g., `_GUID`, `CreateFileW`, `CloseHandle`).
@@ -93,7 +98,7 @@ Tests use `serial_test` because libclang is not fully thread-safe. Integration t
 - **Semantic color roles**: cyan = type names, green = return types/sizes, yellow = ABI locations, white+bold = identifiers, dimmed = metadata/connectors.
 - **Tree connectors**: `├─`, `╰─`, `│` (dimmed) for tree-style output.
 - **Error types**: per-entity error enums in `crates/bb-clang/src/error.rs`. Use `thiserror` derive.
-- **Serialization**: all bb-clang types derive `Serialize`. The `ToJson` trait in `json.rs` provides structured JSON output.
+- **Serialization**: all bb-clang types derive `Serialize`. The `ToJson` trait in `json.rs` provides structured JSON output. `--sqlite` exports mirror `--json` detail via `export_json_to_sqlite`.
 - **Filter pattern**: each CLI has a `FuncFilter`/`StructFilter`/`ConstFilter` struct with pre-parse (Entity-level) and post-parse (constructed type-level) filtering.
 - **Stack offsets are callee-entry RSP/ESP-relative** (after CALL, before prologue). Not RBP-relative.
 
@@ -105,7 +110,9 @@ Tests use `serial_test` because libclang is not fully thread-safe. Integration t
 - **`format_abi_param()`** in `bb-clang/display/function.rs` is the shared ABI row formatter.
 - **`format_tags()`** returns `Vec<String>` so callers can extend before joining.
 - **bb-funcs `enriched` module** owns the sparse metadata rendering. bb-clang stays generic.
-- **bb-funcs `where_filter` module** evaluates SQL WHERE clauses via `sqlparser`.
+- **bb-funcs `where_filter` module** evaluates SQL WHERE clauses via `bb-sql::Evaluator`.
+- **`bb_cli::terminal_width()`** is the shared terminal width helper used by all CLIs.
+- **`bb-sql`** provides a generic `Evaluator<T>` with a column resolver closure, plus `export_json_to_sqlite` for serde-based SQLite export. All CLIs support `--sqlite`.
 
 ## File naming in bb-clang
 

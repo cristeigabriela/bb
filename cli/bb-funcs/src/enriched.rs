@@ -247,10 +247,6 @@ fn render_info_section(out: &mut String, meta: &FuncMetadata) {
 
 /* ──────────────────────── C prototype rendering ────────────────────────── */
 
-fn terminal_width() -> usize {
-    terminal_size::terminal_size().map_or(80, |(w, _)| w.0 as usize)
-}
-
 fn render_prototype(out: &mut String, f: &Function, meta: Option<&FuncMetadata>) {
     let ret = f.get_return_type_name().green();
     let name = f.get_name().cyan().bold();
@@ -265,13 +261,13 @@ fn render_prototype(out: &mut String, f: &Function, meta: Option<&FuncMetadata>)
 
     if params.is_empty() {
         let prefix = format!("  {} {}(void)", f.get_return_type_name(), f.get_name());
-        let pad = terminal_width().saturating_sub(prefix.len() + loc_raw.len());
+        let pad = bb_cli::terminal_width().saturating_sub(prefix.len() + loc_raw.len());
         let _ = writeln!(out, "  {ret} {name}(void){:>pad$}{}", "", loc_raw.dimmed());
         return;
     }
 
     let prefix = format!("  {} {}(", f.get_return_type_name(), f.get_name());
-    let pad = terminal_width().saturating_sub(prefix.len() + loc_raw.len());
+    let pad = bb_cli::terminal_width().saturating_sub(prefix.len() + loc_raw.len());
     let _ = writeln!(out, "  {ret} {name}({:>pad$}{}", "", loc_raw.dimmed());
 
     let sal_width = params

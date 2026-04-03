@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use anyhow::Result;
 use bb_clang::{Struct, ToJson};
 use bb_cli::{get_header_config, print_suggestions};
@@ -52,6 +54,9 @@ struct Args {
         help = "Recursion depth for nested types"
     )]
     depth: usize,
+
+    #[arg(long = "sqlite", help = "Export results to a SQLite database file")]
+    sqlite: Option<PathBuf>,
 }
 
 fn main() -> Result<()> {
@@ -84,7 +89,11 @@ fn main() -> Result<()> {
         );
     }
 
-    if args.json {
+    if let Some(ref path) = args.sqlite {
+        let json_rows: Vec<Value> = structs.iter().map(|s| s.to_json()).collect();
+        bb_sql::export_json_to_sqlite(path, "types", &json_rows)?;
+        eprintln!("exported {} types to {}", structs.len(), path.display());
+    } else if args.json {
         print_json(structs.as_slice())?;
     } else {
         print_display(structs.as_slice(), args.depth, &args.field_name);

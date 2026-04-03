@@ -1,0 +1,10 @@
+[package]
+name = "bb-sql"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+sqlparser.workspace = true
+rusqlite.workspace = true
+anyhow.workspace = true
+serde_json.workspace = true

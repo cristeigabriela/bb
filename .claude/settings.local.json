@@ -6,7 +6,12 @@
       "Bash(export PATH=\"/c/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64:$PATH\")",
       "Bash(cargo test:*)",
       "Bash(cargo check:*)",
-      "Bash(cargo build:*)"
+      "Bash(cargo build:*)",
+      "Bash(gh pr:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(grep -r \"sqlparser\" /c/dev/rust/bb/bb/Cargo.toml /c/dev/rust/bb/bb/cli/*/Cargo.toml /c/dev/rust/bb/bb/crates/*/Cargo.toml)",
+      "Bash(cargo clippy:*)",
+      "Bash(cargo fmt:*)"
     ]
   }
 }

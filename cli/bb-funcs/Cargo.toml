@@ -25,8 +25,7 @@ anyhow.workspace = true
 serde_json.workspace = true
 colored.workspace = true
 comfy-table.workspace = true
-sqlparser.workspace = true
-terminal_size.workspace = true
+bb-sql.workspace = true
 serde.workspace = true
 
 [dev-dependencies]

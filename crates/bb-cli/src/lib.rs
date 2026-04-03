@@ -106,6 +106,12 @@ pub fn current_command_string() -> String {
     std::env::args().collect::<Vec<_>>().join(" ")
 }
 
+/// Returns the current terminal width, defaulting to 80 columns.
+#[must_use]
+pub fn terminal_width() -> usize {
+    terminal_size::terminal_size().map_or(80, |(w, _)| w.0 as usize)
+}
+
 /* ─────────────────────────────────── SDK ────────────────────────────────── */
 
 /// Build a [`HeaderConfig`] from the command-line arguments.

@@ -181,12 +181,15 @@ impl<'a> Constant<'a> {
             .map(|c| c.get_name().to_string())
             .collect();
 
+        let expression = super::expression_from_body_tokens(&body_tokens);
+
         Ok(Self::new(
             entity,
             name,
             value,
             type_name,
             location,
+            expression,
             body_tokens,
             components,
             component_constants,
