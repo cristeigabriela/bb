@@ -249,16 +249,25 @@ fn extract_body_tokens(tokens: &[Token]) -> Vec<MacroBodyToken> {
 }
 
 /// Reconstruct the C expression string from macro body tokens.
+///
+/// Brackets are joined without surrounding spaces: `(FOO | BAR)` not `( FOO | BAR )`.
 pub(crate) fn expression_from_body_tokens(tokens: &[MacroBodyToken]) -> Option<String> {
     if tokens.is_empty() {
         return None;
     }
-    let expr: String = tokens
-        .iter()
-        .map(|t| t.lit_representation.as_str())
-        .collect::<Vec<_>>()
-        .join(" ");
-    let trimmed = expr.trim();
+    let mut out = String::new();
+    for (i, t) in tokens.iter().enumerate() {
+        let s = t.lit_representation.as_str();
+        // No space before close brackets or after open brackets.
+        if i > 0 && s != ")" && s != "]" {
+            let prev = tokens[i - 1].lit_representation.as_str();
+            if prev != "(" && prev != "[" {
+                out.push(' ');
+            }
+        }
+        out.push_str(s);
+    }
+    let trimmed = out.trim();
     if trimmed.is_empty() {
         None
     } else {
@@ -284,7 +293,18 @@ fn extract_expression_from_entity(entity: &Entity) -> Option<String> {
     if expr_tokens.is_empty() {
         return None;
     }
-    Some(expr_tokens.join(" "))
+    // Join without spaces around brackets.
+    let mut out = String::new();
+    for (i, s) in expr_tokens.iter().enumerate() {
+        if i > 0 && s != ")" && s != "]" {
+            let prev = &expr_tokens[i - 1];
+            if prev != "(" && prev != "[" {
+                out.push(' ');
+            }
+        }
+        out.push_str(s);
+    }
+    Some(out)
 }
 
 /* ───────────────────────────── Type utilities ───────────────────────────── */

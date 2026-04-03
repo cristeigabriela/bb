@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use bb_clang::{Struct, ToJson};
 use bb_cli::{get_header_config, print_suggestions};
+use bb_sql::export_json_to_sqlite;
 use bb_types_lib::{StructFilter, collect_structs, iter_structs};
 use clang::{Clang, Index};
 use clap::Parser;
@@ -91,8 +92,7 @@ fn main() -> Result<()> {
 
     if let Some(ref path) = args.sqlite {
         let json_rows: Vec<Value> = structs.iter().map(|s| s.to_json()).collect();
-        bb_sql::export_json_to_sqlite(path, "types", &json_rows)?;
-        eprintln!("exported {} types to {}", structs.len(), path.display());
+        export_json_to_sqlite(path, "types", &json_rows)?;
     } else if args.json {
         print_json(structs.as_slice())?;
     } else {

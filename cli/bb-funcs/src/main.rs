@@ -11,6 +11,7 @@ use bb_funcs_lib::enriched::{
 use bb_funcs_lib::{
     FuncFilter, FuncSort, ParamCountFilter, SortDir, collect_funcs_filtered, iter_funcs,
 };
+use bb_sql::export_json_to_sqlite;
 use clang::{Clang, Index};
 use clap::Parser;
 use serde_json::Value;
@@ -178,8 +179,7 @@ fn main() -> Result<()> {
             .iter()
             .map(|f| function_to_enriched_json(f, const_lookup.as_ref()))
             .collect();
-        bb_sql::export_json_to_sqlite(path, "functions", &json_rows)?;
-        eprintln!("exported {} functions to {}", funcs.len(), path.display());
+        export_json_to_sqlite(path, "functions", &json_rows)?;
     } else if args.json {
         print_json(funcs.as_slice(), const_lookup.as_ref())?;
     } else {

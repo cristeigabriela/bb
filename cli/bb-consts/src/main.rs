@@ -8,6 +8,7 @@ use bb_consts_lib::{
     iter_enums, parse_name_pattern,
 };
 use bb_shared::glob_match;
+use bb_sql::export_json_to_sqlite;
 use clang::{Clang, Index};
 use clap::Parser;
 use serde_json::Value;
@@ -175,13 +176,10 @@ fn print_json(enums: &[Enum], vars: &[Constant], filter: &ConstFilter) -> Result
 /* ──────────────────────────── SQLite export ───────────────────────────── */
 
 fn export_consts_sqlite(enums: &[Enum], vars: &[Constant], path: &std::path::Path) -> Result<()> {
-    let mut total = 0;
-
     // Export standalone constants to their own table.
     let const_rows: Vec<Value> = vars.iter().map(|c| c.to_json()).collect();
-    total += const_rows.len();
     if !const_rows.is_empty() {
-        bb_sql::export_json_to_sqlite(path, "constants", &const_rows)?;
+        export_json_to_sqlite(path, "constants", &const_rows)?;
     }
 
     // Export enum constants to a separate table (includes parent enum name).
@@ -195,17 +193,15 @@ fn export_consts_sqlite(enums: &[Enum], vars: &[Constant], path: &std::path::Pat
             enum_const_rows.push(val);
         }
     }
-    total += enum_const_rows.len();
     if !enum_const_rows.is_empty() {
-        bb_sql::export_json_to_sqlite(path, "enum_constants", &enum_const_rows)?;
+        export_json_to_sqlite(path, "enum_constants", &enum_const_rows)?;
     }
 
     // Export enums themselves as a third table.
     let enum_rows: Vec<Value> = enums.iter().map(|e| e.to_json()).collect();
     if !enum_rows.is_empty() {
-        bb_sql::export_json_to_sqlite(path, "enums", &enum_rows)?;
+        export_json_to_sqlite(path, "enums", &enum_rows)?;
     }
 
-    eprintln!("exported {total} constants to {}", path.display());
     Ok(())
 }

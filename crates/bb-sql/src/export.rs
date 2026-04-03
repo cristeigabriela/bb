@@ -141,11 +141,14 @@ pub fn export_json_to_sqlite(path: &Path, table: &str, rows: &[Value]) -> Result
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use serde_json::json;
     use std::collections::HashSet;
-
+    use std::fs;
     use std::sync::atomic::{AtomicU32, Ordering};
+
+    use serde_json::json;
+
+    use super::*;
+
     static COUNTER: AtomicU32 = AtomicU32::new(0);
 
     fn temp_db() -> std::path::PathBuf {
@@ -157,7 +160,7 @@ mod tests {
     #[test]
     fn export_basic_rows() {
         let path = temp_db();
-        let _ = std::fs::remove_file(&path);
+        let _ = fs::remove_file(&path);
 
         let rows = vec![
             json!({"name": "foo", "value": 42, "active": true}),
@@ -177,13 +180,13 @@ mod tests {
             .unwrap();
         assert_eq!(name, "foo");
 
-        std::fs::remove_file(&path).ok();
+        fs::remove_file(&path).ok();
     }
 
     #[test]
     fn export_empty_rows_creates_table() {
         let path = temp_db();
-        let _ = std::fs::remove_file(&path);
+        let _ = fs::remove_file(&path);
 
         export_json_to_sqlite(&path, "empty", &[]).unwrap();
 
@@ -198,13 +201,13 @@ mod tests {
             .unwrap();
         assert_eq!(exists, 1);
 
-        std::fs::remove_file(&path).ok();
+        fs::remove_file(&path).ok();
     }
 
     #[test]
     fn schema_union_across_rows() {
         let path = temp_db();
-        let _ = std::fs::remove_file(&path);
+        let _ = fs::remove_file(&path);
 
         // First row has no "extra" field, second row does.
         // Both should be captured.
@@ -244,13 +247,13 @@ mod tests {
             .unwrap();
         assert_eq!(extra.as_deref(), Some("hello"));
 
-        std::fs::remove_file(&path).ok();
+        fs::remove_file(&path).ok();
     }
 
     #[test]
     fn nested_json_stored_as_text() {
         let path = temp_db();
-        let _ = std::fs::remove_file(&path);
+        let _ = fs::remove_file(&path);
 
         let rows = vec![json!({"name": "x", "nested": {"a": 1, "b": 2}})];
 
@@ -265,13 +268,13 @@ mod tests {
         assert_eq!(parsed["a"], 1);
         assert_eq!(parsed["b"], 2);
 
-        std::fs::remove_file(&path).ok();
+        fs::remove_file(&path).ok();
     }
 
     #[test]
     fn multiple_tables_same_file() {
         let path = temp_db();
-        let _ = std::fs::remove_file(&path);
+        let _ = fs::remove_file(&path);
 
         let rows1 = vec![json!({"x": 1})];
         let rows2 = vec![json!({"y": 2})];
@@ -289,6 +292,6 @@ mod tests {
         assert_eq!(t1, 1);
         assert_eq!(t2, 2);
 
-        std::fs::remove_file(&path).ok();
+        fs::remove_file(&path).ok();
     }
 }
