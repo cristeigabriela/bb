@@ -6,7 +6,8 @@ use clang::{Entity, EntityKind, Type};
 use serde::Serialize;
 
 use super::abi::CallConv;
-use crate::{SourceLocation, error::ParamError, ext::UnderlyingType};
+use crate::type_info::TypeInfo;
+use crate::{SourceLocation, error::ParamError};
 
 /* ────────────────────────────────── Types ───────────────────────────────── */
 
@@ -18,10 +19,10 @@ pub struct Param<'a> {
     #[allow(unused)]
     semantic_parent: Entity<'a>,
     name: Option<String>,
-    #[serde(skip)]
-    type_: Type<'a>,
     #[serde(rename = "type")]
     type_name: String,
+    #[serde(flatten)]
+    type_info: TypeInfo<'a>,
     location: Option<SourceLocation>,
     abi_location: ParamLocation,
 }
@@ -41,8 +42,8 @@ impl<'a> Param<'a> {
         self.name.as_deref()
     }
     #[must_use]
-    pub const fn get_type(&self) -> &Type<'a> {
-        &self.type_
+    pub fn get_type(&self) -> &Type<'a> {
+        self.type_info.get_type()
     }
     #[must_use]
     pub fn get_type_name(&self) -> &str {
@@ -50,7 +51,11 @@ impl<'a> Param<'a> {
     }
     #[must_use]
     pub fn get_canonical_type(&self) -> Type<'a> {
-        self.type_.get_canonical_type()
+        self.type_info.get_canonical_type()
+    }
+    #[must_use]
+    pub const fn get_type_info(&self) -> &TypeInfo<'a> {
+        &self.type_info
     }
     #[must_use]
     pub const fn get_location(&self) -> Option<&SourceLocation> {
@@ -79,11 +84,10 @@ impl<'a> Param<'a> {
         }
     }
 
-    /// Returns the underlying type of this field, resolving pointers and arrays.
-    #[allow(unused)]
+    /// Returns the underlying type of this parameter, resolving pointers and arrays.
     #[must_use]
     pub fn get_underlying_type(&self) -> Type<'a> {
-        self.get_type().get_underlying_type()
+        self.type_info.get_underlying_type()
     }
 }
 
@@ -106,6 +110,9 @@ impl<'a> TryFrom<Entity<'a>> for Param<'a> {
         let type_name = type_.get_display_name();
         let location = SourceLocation::from_entity(&entity);
 
+        let mut type_info = TypeInfo::from(type_);
+        type_info.suppress_underlying_if_matches(Some(&type_name));
+
         // Compute ABI location from context: arch from TU, calling convention
         // and positional index from the parent function declaration.
         let abi_location = compute_abi_location(&entity, &semantic_parent)?;
@@ -114,8 +121,8 @@ impl<'a> TryFrom<Entity<'a>> for Param<'a> {
             entity,
             semantic_parent,
             name,
-            type_,
             type_name,
+            type_info,
             location,
             abi_location,
         })

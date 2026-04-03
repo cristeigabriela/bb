@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use bb_clang::Function;
 use bb_clang::display::render_function_list;
-use bb_cli::{get_header_config, print_suggestions};
+use bb_cli::{current_command_string, get_header_config, print_suggestions};
 use bb_funcs_lib::enriched::{
     ConstantLookup, build_constant_lookup_from_tu, function_to_enriched_json,
     functions_to_enriched_json, render_enriched_detail,
@@ -205,7 +205,7 @@ fn print_display(funcs: &[Function], detail: bool, const_lookup: Option<&Constan
 }
 
 fn print_json(funcs: &[Function], const_lookup: Option<&ConstantLookup>) -> Result<()> {
-    let command = bb_cli::current_command_string();
+    let command = current_command_string();
     let mut output = serde_json::json!({
         "functions": functions_to_enriched_json(funcs, const_lookup),
     });

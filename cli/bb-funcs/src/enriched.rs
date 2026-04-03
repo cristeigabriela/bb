@@ -9,10 +9,9 @@ use std::collections::HashMap;
 use std::fmt::Write;
 
 use bb_arch::display::{param_abi_to_json, return_abi_to_json};
-use bb_clang::display::{
-    format_abi_param, format_arch, format_callconv, format_return_location, format_tags,
-};
-use bb_clang::{Constant, Function, Param, SourceLocation};
+use bb_clang::display::{format_abi_param, format_return_location, format_tags};
+use bb_clang::{Constant, Function, Param, SourceLocation, ToJson};
+use bb_cli::terminal_width;
 use bb_consts_lib::{ConstFilter, collect_constants, collect_enums};
 use bb_sparse::{FuncMetadata, ParamMetadata};
 use colored::Colorize;
@@ -261,13 +260,13 @@ fn render_prototype(out: &mut String, f: &Function, meta: Option<&FuncMetadata>)
 
     if params.is_empty() {
         let prefix = format!("  {} {}(void)", f.get_return_type_name(), f.get_name());
-        let pad = bb_cli::terminal_width().saturating_sub(prefix.len() + loc_raw.len());
+        let pad = terminal_width().saturating_sub(prefix.len() + loc_raw.len());
         let _ = writeln!(out, "  {ret} {name}(void){:>pad$}{}", "", loc_raw.dimmed());
         return;
     }
 
     let prefix = format!("  {} {}(", f.get_return_type_name(), f.get_name());
-    let pad = bb_cli::terminal_width().saturating_sub(prefix.len() + loc_raw.len());
+    let pad = terminal_width().saturating_sub(prefix.len() + loc_raw.len());
     let _ = writeln!(out, "  {ret} {name}({:>pad$}{}", "", loc_raw.dimmed());
 
     let sal_width = params
@@ -426,55 +425,61 @@ pub fn function_to_enriched_json(f: &Function, const_lookup: Option<&ConstantLoo
     let ef = EnrichedFunction::new_ref(f);
     let meta = ef.metadata;
 
+    // Start from the base serde JSON for each param, then enrich with
+    // sparse metadata and reformatted ABI info.
     let params: Vec<Value> = f
         .get_params()
         .iter()
         .enumerate()
         .map(|(i, p)| {
-            let pm = meta.and_then(|m| p.get_name().and_then(|n| m.params.get(n)));
+            let mut pj = p.to_json();
+            let obj = pj.as_object_mut().unwrap();
 
+            // Replace raw abi_location with the enriched format.
+            obj.remove("abi_location");
+            obj.insert("index".into(), json!(i));
+            obj.insert("abi".into(), param_abi_to_json(p.get_abi_location()));
+
+            // Add sparse metadata (directions, known constant values).
+            let pm = meta.and_then(|m| p.get_name().and_then(|n| m.params.get(n)));
             let dirs: Vec<String> = pm
                 .map(bb_sparse::ParamMetadata::direction_strings)
                 .unwrap_or_default();
+            obj.insert("directions".into(), json!(dirs));
+            obj.insert(
+                "values".into(),
+                pm.map_or_else(|| json!({}), |m| param_values_to_json(m, const_lookup)),
+            );
 
-            let values = pm.map_or_else(|| json!({}), |m| param_values_to_json(m, const_lookup));
-
-            json!({
-                "index": i,
-                "name": p.get_name(),
-                "type": p.get_type_name(),
-                "abi": param_abi_to_json(p.get_abi_location()),
-                "directions": dirs,
-                "values": values,
-            })
+            pj
         })
         .collect();
 
-    let metadata_json = meta.map(|m| {
-        let api = m.metadata.as_ref();
-        json!({
-            "dll": m.dll_display(),
-            "lib": m.lib_display(),
-            "min_client": m.min_client_str(),
-            "min_server": m.min_server_str(),
-            "variants": api.map(bb_sparse::ApiMetadata::names).unwrap_or_default(),
-            "locations": api.map(bb_sparse::ApiMetadata::locations).unwrap_or_default(),
-        })
-    });
+    // Build the function-level JSON from the base serde output, then enrich.
+    let mut fj = f.to_json();
+    let obj = fj.as_object_mut().unwrap();
+    obj.insert("params".into(), json!(params));
+    obj.insert(
+        "return_abi".into(),
+        return_abi_to_json(f.get_return_location()),
+    );
 
-    json!({
-        "name": f.get_name(),
-        "return_type": f.get_return_type_name(),
-        "arch": format_arch(f.get_arch()),
-        "calling_convention": format_callconv(f.get_calling_convention()),
-        // is_dllimport in SDK headers = the function is exported from a DLL.
-        "is_exported": f.is_dllimport(),
-        "has_body": f.has_body(),
-        "location": f.get_location().and_then(|l| serde_json::to_value(l).ok()),
-        "params": params,
-        "return_abi": return_abi_to_json(f.get_return_location()),
-        "metadata": metadata_json,
-    })
+    if let Some(m) = meta {
+        let api = m.metadata.as_ref();
+        obj.insert(
+            "metadata".into(),
+            json!({
+                "dll": m.dll_display(),
+                "lib": m.lib_display(),
+                "min_client": m.min_client_str(),
+                "min_server": m.min_server_str(),
+                "variants": api.map(bb_sparse::ApiMetadata::names).unwrap_or_default(),
+                "locations": api.map(bb_sparse::ApiMetadata::locations).unwrap_or_default(),
+            }),
+        );
+    }
+
+    fj
 }
 
 /// Serialize a slice of functions to enriched JSON array.

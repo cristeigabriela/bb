@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use bb_clang::{Struct, ToJson};
-use bb_cli::{get_header_config, print_suggestions};
+use bb_cli::{current_command_string, get_header_config, print_suggestions};
 use bb_sql::export_json_to_sqlite;
 use bb_types_lib::{StructFilter, collect_structs, iter_structs};
 use clang::{Clang, Index};
@@ -122,7 +122,7 @@ fn print_display(structs: &[Struct], depth: usize, field_name: &Option<String>) 
 /// Uses [`ToJson::to_json_full`] on the struct slice to produce all matched
 /// types and their nested referenced types, fully expanded and deduplicated.
 fn print_json(structs: &[Struct]) -> anyhow::Result<()> {
-    let command = bb_cli::current_command_string();
+    let command = current_command_string();
     let mut output = structs.to_json_full();
     output
         .as_object_mut()

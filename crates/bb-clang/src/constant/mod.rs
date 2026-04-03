@@ -250,7 +250,9 @@ fn extract_body_tokens(tokens: &[Token]) -> Vec<MacroBodyToken> {
 
 /// Reconstruct the C expression string from macro body tokens.
 ///
-/// Brackets are joined without surrounding spaces: `(FOO | BAR)` not `( FOO | BAR )`.
+/// Spaces are inserted only between two "word" tokens (identifiers or
+/// number literals). Punctuation and brackets bind tightly:
+/// `(DWORD)(FOO | BAR)` not `( DWORD ) ( FOO | BAR )`.
 pub(crate) fn expression_from_body_tokens(tokens: &[MacroBodyToken]) -> Option<String> {
     if tokens.is_empty() {
         return None;
@@ -258,12 +260,8 @@ pub(crate) fn expression_from_body_tokens(tokens: &[MacroBodyToken]) -> Option<S
     let mut out = String::new();
     for (i, t) in tokens.iter().enumerate() {
         let s = t.lit_representation.as_str();
-        // No space before close brackets or after open brackets.
-        if i > 0 && s != ")" && s != "]" {
-            let prev = tokens[i - 1].lit_representation.as_str();
-            if prev != "(" && prev != "[" {
-                out.push(' ');
-            }
+        if i > 0 && needs_space(tokens[i - 1].lit_representation.as_str(), s) {
+            out.push(' ');
         }
         out.push_str(s);
     }
@@ -273,6 +271,20 @@ pub(crate) fn expression_from_body_tokens(tokens: &[MacroBodyToken]) -> Option<S
     } else {
         Some(trimmed.to_string())
     }
+}
+
+/// Whether a space is needed between two adjacent tokens.
+///
+/// Space is inserted only when both tokens are "words" (identifiers,
+/// numbers, keywords). Punctuation tokens never get leading/trailing spaces.
+fn needs_space(prev: &str, cur: &str) -> bool {
+    is_word_token(prev) && is_word_token(cur)
+}
+
+fn is_word_token(s: &str) -> bool {
+    s.bytes()
+        .next()
+        .is_some_and(|b| b.is_ascii_alphanumeric() || b == b'_')
 }
 
 /// Extract the C expression from an entity's token range (for enum constants and var decls).
@@ -293,14 +305,10 @@ fn extract_expression_from_entity(entity: &Entity) -> Option<String> {
     if expr_tokens.is_empty() {
         return None;
     }
-    // Join without spaces around brackets.
     let mut out = String::new();
     for (i, s) in expr_tokens.iter().enumerate() {
-        if i > 0 && s != ")" && s != "]" {
-            let prev = &expr_tokens[i - 1];
-            if prev != "(" && prev != "[" {
-                out.push(' ');
-            }
+        if i > 0 && needs_space(expr_tokens[i - 1].as_str(), s) {
+            out.push(' ');
         }
         out.push_str(s);
     }

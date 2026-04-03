@@ -13,6 +13,7 @@ mod function;
 mod json;
 pub(crate) mod location;
 mod struct_;
+mod type_info;
 
 pub use constant::{
     ConstLookup, ConstValue, Constant, MacroBodyToken, StripOuterParens, TuEntityMap,
@@ -26,6 +27,7 @@ pub use json::{ToJson, build_referred_components, collect_component_constants};
 pub use location::{SourceLocation, entity_in_header};
 pub use struct_::Field;
 pub use struct_::Struct;
+pub use type_info::TypeInfo;
 
 // Re-export commonly used clang types for convenience
 pub use clang::{Entity, EntityKind, Index, TranslationUnit, Unsaved};

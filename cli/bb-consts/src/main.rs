@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use bb_clang::{ConstLookup, Constant, Enum, ToJson, build_referred_components, render_constants};
-use bb_cli::{get_header_config, print_suggestions};
+use bb_cli::{current_command_string, get_header_config, print_suggestions};
 use bb_consts_lib::{
     ConstFilter, build_lookup_table, collect_constants, collect_enums, filter_constants_by_name,
     iter_enums, parse_name_pattern,
@@ -157,7 +157,7 @@ fn print_json(enums: &[Enum], vars: &[Constant], filter: &ConstFilter) -> Result
         })
         .collect();
 
-    let command = bb_cli::current_command_string();
+    let command = current_command_string();
 
     let referred =
         build_referred_components(vars.iter().map(|c| c.get_name().to_string()), vars.iter());
