@@ -50,7 +50,9 @@ fn main() {
     let sdk_api_content = sdk_api_dir.join("sdk-api-src/content");
 
     if !sparse_py.exists() {
-        println!("cargo::warning=sparse submodule not found — embedding empty data. Run `git submodule update --init --recursive`");
+        println!(
+            "cargo::warning=sparse submodule not found — embedding empty data. Run `git submodule update --init --recursive`"
+        );
         write_empty(&gz_path);
         return;
     }
@@ -66,7 +68,9 @@ fn main() {
         match status {
             Ok(s) if s.success() => {}
             Ok(s) => {
-                println!("cargo::warning=git submodule init failed (exit {s}) — embedding empty sparse data");
+                println!(
+                    "cargo::warning=git submodule init failed (exit {s}) — embedding empty sparse data"
+                );
                 write_empty(&gz_path);
                 return;
             }
@@ -79,7 +83,9 @@ fn main() {
     }
 
     if !sdk_api_content.exists() {
-        println!("cargo::warning=sdk-api content not found after submodule init — embedding empty sparse data");
+        println!(
+            "cargo::warning=sdk-api content not found after submodule init — embedding empty sparse data"
+        );
         write_empty(&gz_path);
         return;
     }
@@ -95,7 +101,9 @@ fn main() {
     // Run sparse.py to generate the JSON.
     eprintln!("bb-sparse: running sparse.py to generate API metadata...");
     let Some(python) = find_python() else {
-        println!("cargo::warning=python3 not found on PATH — embedding empty sparse data. Install Python 3 or set BB_SPARSE_JSON");
+        println!(
+            "cargo::warning=python3 not found on PATH — embedding empty sparse data. Install Python 3 or set BB_SPARSE_JSON"
+        );
         write_empty(&gz_path);
         return;
     };
