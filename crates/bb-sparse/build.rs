@@ -50,8 +50,7 @@ fn main() {
     let sdk_api_content = sdk_api_dir.join("sdk-api-src/content");
 
     if !sparse_py.exists() {
-        eprintln!("bb-sparse: sparse submodule not found, embedding empty data");
-        eprintln!("  hint: run `git submodule update --init --recursive`");
+        println!("cargo::warning=sparse submodule not found — embedding empty data. Run `git submodule update --init --recursive`");
         write_empty(&gz_path);
         return;
     }
@@ -67,12 +66,12 @@ fn main() {
         match status {
             Ok(s) if s.success() => {}
             Ok(s) => {
-                eprintln!("bb-sparse: git submodule init failed (exit {s}), embedding empty data");
+                println!("cargo::warning=git submodule init failed (exit {s}) — embedding empty sparse data");
                 write_empty(&gz_path);
                 return;
             }
             Err(e) => {
-                eprintln!("bb-sparse: git not available ({e}), embedding empty data");
+                println!("cargo::warning=git not available ({e}) — embedding empty sparse data");
                 write_empty(&gz_path);
                 return;
             }
@@ -80,9 +79,7 @@ fn main() {
     }
 
     if !sdk_api_content.exists() {
-        eprintln!(
-            "bb-sparse: sdk-api content not found after submodule init, embedding empty data"
-        );
+        println!("cargo::warning=sdk-api content not found after submodule init — embedding empty sparse data");
         write_empty(&gz_path);
         return;
     }
@@ -98,8 +95,7 @@ fn main() {
     // Run sparse.py to generate the JSON.
     eprintln!("bb-sparse: running sparse.py to generate API metadata...");
     let Some(python) = find_python() else {
-        eprintln!("bb-sparse: python3 not found on PATH, embedding empty data");
-        eprintln!("  hint: install Python 3 or set BB_SPARSE_JSON to a pre-generated file");
+        println!("cargo::warning=python3 not found on PATH — embedding empty sparse data. Install Python 3 or set BB_SPARSE_JSON");
         write_empty(&gz_path);
         return;
     };
@@ -118,15 +114,6 @@ fn main() {
 
     let output = cmd.output();
 
-    // Log stderr from sparse.py on failure.
-    if let Ok(ref o) = output {
-        if !o.status.success() {
-            for line in String::from_utf8_lossy(&o.stderr).lines() {
-                eprintln!("bb-sparse: py: {line}");
-            }
-        }
-    }
-
     match output.as_ref().map(|o| o.status) {
         Ok(s) if s.success() && generated_json.exists() => {
             eprintln!("bb-sparse: sparse.py completed successfully");
@@ -137,11 +124,21 @@ fn main() {
             }
         }
         Ok(s) => {
-            eprintln!("bb-sparse: sparse.py failed (exit {s}), embedding empty data");
+            let stderr = output
+                .as_ref()
+                .map(|o| String::from_utf8_lossy(&o.stderr).to_string())
+                .unwrap_or_default();
+            // Show full traceback: one cargo::warning per line for visibility.
+            println!("cargo::warning=sparse.py failed (exit {s}) — embedding empty data");
+            for line in stderr.lines().take(20) {
+                if !line.trim().is_empty() {
+                    println!("cargo::warning=  {line}");
+                }
+            }
             write_empty(&gz_path);
         }
         Err(e) => {
-            eprintln!("bb-sparse: failed to run python ({e}), embedding empty data");
+            println!("cargo::warning=failed to run python ({e}) — embedding empty sparse data");
             write_empty(&gz_path);
         }
     }
