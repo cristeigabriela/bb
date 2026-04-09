@@ -118,9 +118,6 @@ impl<'a> Struct<'a> {
     /// * `seen` - Set of type names already processed (for global deduplication).
     /// * `max_depth` - Maximum recursion depth.
     /// * `current_depth` - Current recursion level.
-    ///
-    /// Note: Unlike `write_fields()`, we don't remove names from `seen` after processing
-    /// because we want each type to appear only once in the final result.
     fn collect_nested(
         &self,
         result: &mut Vec<Self>,
@@ -157,7 +154,7 @@ impl<'a> TryFrom<Entity<'a>> for Struct<'a> {
             return Err(StructError::NotStructOrClass(kind));
         }
 
-        let location = SourceLocation::from_entity(&entity);
+        let location = SourceLocation::try_from(&entity).ok();
 
         // Handle anonymous structures
         let is_anonymous = entity

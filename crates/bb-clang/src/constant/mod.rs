@@ -178,7 +178,7 @@ impl<'a> TryFrom<Entity<'a>> for Constant<'a> {
         let kind = entity.get_kind();
         let name = entity.get_name().ok_or(ConstantError::NoName)?;
         let type_name = entity.get_type().map(|t| t.get_display_name());
-        let location = SourceLocation::from_entity(&entity);
+        let location = SourceLocation::try_from(&entity).ok();
 
         let (value, expression, body_tokens) = match kind {
             EntityKind::EnumConstantDecl => {

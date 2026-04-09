@@ -174,7 +174,7 @@ impl<'a> Constant<'a> {
             .map_err(|_| ConstantError::NotEvaluable)?;
 
         let value = ConstValue::from_cexpr(result).ok_or(ConstantError::NotEvaluable)?;
-        let location = SourceLocation::from_entity(&entity);
+        let location = SourceLocation::try_from(&entity).ok();
 
         let components: Vec<String> = component_constants
             .iter()

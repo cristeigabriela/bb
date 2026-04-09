@@ -105,6 +105,7 @@ impl ToJson for Struct<'_> {
     }
 }
 
+/// Universally handle references.
 impl<T: ToJson> ToJson for &T {
     fn to_json(&self) -> Value {
         (*self).to_json()
@@ -116,11 +117,6 @@ impl<T: ToJson> ToJson for &T {
 }
 
 /* ───────────────────────────────── Slices ───────────────────────────────── */
-
-/// Helper: map each element's `to_json` into a JSON array.
-fn slice_to_json<T: ToJson>(slice: &[T]) -> Value {
-    Value::Array(slice.iter().map(T::to_json).collect())
-}
 
 impl ToJson for [Constant<'_>] {
     fn to_json(&self) -> Value {
@@ -146,21 +142,13 @@ impl ToJson for [Constant<'_>] {
     }
 }
 
-impl ToJson for [&Constant<'_>] {
-    fn to_json(&self) -> Value {
-        slice_to_json(self)
-    }
-}
-
 impl ToJson for [Enum<'_>] {
     fn to_json(&self) -> Value {
         slice_to_json(self)
     }
-}
 
-impl ToJson for [&Enum<'_>] {
-    fn to_json(&self) -> Value {
-        slice_to_json(self)
+    fn to_json_full(&self) -> Value {
+        slice_to_json_full(self)
     }
 }
 
@@ -168,11 +156,9 @@ impl ToJson for [Field<'_>] {
     fn to_json(&self) -> Value {
         slice_to_json(self)
     }
-}
 
-impl ToJson for [&Field<'_>] {
-    fn to_json(&self) -> Value {
-        slice_to_json(self)
+    fn to_json_full(&self) -> Value {
+        slice_to_json_full(self)
     }
 }
 
@@ -180,11 +166,9 @@ impl ToJson for [Function<'_>] {
     fn to_json(&self) -> Value {
         slice_to_json(self)
     }
-}
 
-impl ToJson for [&Function<'_>] {
-    fn to_json(&self) -> Value {
-        slice_to_json(self)
+    fn to_json_full(&self) -> Value {
+        slice_to_json_full(self)
     }
 }
 
@@ -192,17 +176,9 @@ impl ToJson for [Param<'_>] {
     fn to_json(&self) -> Value {
         slice_to_json(self)
     }
-}
 
-impl ToJson for [&Param<'_>] {
-    fn to_json(&self) -> Value {
-        slice_to_json(self)
-    }
-}
-
-impl ToJson for [&Struct<'_>] {
-    fn to_json(&self) -> Value {
-        slice_to_json(self)
+    fn to_json_full(&self) -> Value {
+        slice_to_json_full(self)
     }
 }
 
@@ -239,6 +215,17 @@ impl ToJson for [Struct<'_>] {
     }
 }
 
+/// Universally handle slices of references.
+impl<T: ToJson> ToJson for [&T] {
+    fn to_json(&self) -> Value {
+        slice_to_json(self)
+    }
+
+    fn to_json_full(&self) -> Value {
+        slice_to_json_full(self)
+    }
+}
+
 /* ────────────────────────────────── Vecs ────────────────────────────────── */
 
 impl<T: ToJson> ToJson for Vec<T>
@@ -252,6 +239,18 @@ where
     fn to_json_full(&self) -> Value {
         self.as_slice().to_json_full()
     }
+}
+
+/* ───────────────────────────────── Helpers ──────────────────────────────── */
+
+/// Helper: map each element's `T::to_json` into a JSON array.
+fn slice_to_json<T: ToJson>(slice: &[T]) -> Value {
+    Value::Array(slice.iter().map(T::to_json).collect())
+}
+
+/// Helper: map each element's `T::to_json` into a JSON array.
+fn slice_to_json_full<T: ToJson>(slice: &[T]) -> Value {
+    Value::Array(slice.iter().map(T::to_json_full).collect())
 }
 
 /* ──────────────────────────── Component helpers ─────────────────────────── */

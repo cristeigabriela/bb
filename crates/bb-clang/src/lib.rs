@@ -25,7 +25,9 @@ pub use constant::{
 };
 pub use display::render_constants;
 pub use enum_::Enum;
-pub use error::{ConstantError, EnumError, FieldError, FunctionError, StructError};
+pub use error::{
+    ConstantError, EnumError, FieldError, FunctionError, SourceLocationError, StructError,
+};
 pub use function::{CallConv, Function, Param};
 pub use json::{ToJson, build_referred_components, collect_component_constants};
 pub use location::{SourceLocation, entity_in_header};
