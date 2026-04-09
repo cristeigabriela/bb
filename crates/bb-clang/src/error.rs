@@ -3,6 +3,12 @@
 use clang::EntityKind;
 use thiserror::Error;
 
+/* ────────────────────────────────── Types ───────────────────────────────── */
+
+#[derive(Debug, Error)]
+#[error("Entity does not have a source location")]
+pub struct SourceLocationError;
+
 #[derive(Debug, Error)]
 pub enum StructError {
     #[error("Entity is neither a struct or class: {0:?}")]
@@ -81,6 +87,8 @@ pub enum ParamError {
 
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error("SourceLocation error: {0}")]
+    SourceLocation(#[from] SourceLocationError),
     #[error("Struct error: {0}")]
     Struct(#[from] StructError),
     #[error("Field error: {0}")]

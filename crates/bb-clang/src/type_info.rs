@@ -9,7 +9,7 @@ use serde::Serialize;
 
 use crate::ext::UnderlyingType;
 
-/* ────────────────────────────────── Type ───────────────────────────────── */
+/* ────────────────────────────────── Type ────────────────────────────────── */
 
 /// Extracted type metadata from a [`clang::Type`].
 ///
@@ -39,6 +39,40 @@ pub struct TypeInfo<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub array_size: Option<usize>,
 }
+
+impl<'a> TypeInfo<'a> {
+    /// Clear `underlying_type` if it matches the given display name.
+    ///
+    /// Used by [`Field`](crate::Field) and [`Param`](crate::Param) to avoid
+    /// redundant output when the underlying type is the same as the display type.
+    pub fn suppress_underlying_if_matches(&mut self, display_name: Option<&str>) {
+        if let Some(ref u) = self.underlying_type {
+            if display_name.is_some_and(|d| d == u) {
+                self.underlying_type = None;
+            }
+        }
+    }
+
+    /// The raw clang type.
+    #[must_use]
+    pub const fn get_type(&self) -> &Type<'a> {
+        &self.type_
+    }
+
+    /// The canonical (fully resolved typedef) form of this type.
+    #[must_use]
+    pub fn get_canonical_type(&self) -> Type<'a> {
+        self.type_.get_canonical_type()
+    }
+
+    /// The underlying type after resolving pointers and arrays.
+    #[must_use]
+    pub fn get_underlying_type(&self) -> Type<'a> {
+        self.type_.get_underlying_type()
+    }
+}
+
+/* ─────────────────────────────── Conversions ────────────────────────────── */
 
 impl<'a> From<Type<'a>> for TypeInfo<'a> {
     /// Extract type metadata from a clang type.
@@ -78,41 +112,13 @@ impl<'a> From<Type<'a>> for TypeInfo<'a> {
     }
 }
 
-impl<'a> TypeInfo<'a> {
-    /// Clear `underlying_type` if it matches the given display name.
-    ///
-    /// Used by [`Field`](crate::Field) and [`Param`](crate::Param) to avoid
-    /// redundant output when the underlying type is the same as the display type.
-    pub fn suppress_underlying_if_matches(&mut self, display_name: Option<&str>) {
-        if let Some(ref u) = self.underlying_type {
-            if display_name.is_some_and(|d| d == u) {
-                self.underlying_type = None;
-            }
-        }
-    }
+/* ───────────────────────────────── Helpers ──────────────────────────────── */
 
-    /// The raw clang type.
-    #[must_use]
-    pub const fn get_type(&self) -> &Type<'a> {
-        &self.type_
-    }
-
-    /// The canonical (fully resolved typedef) form of this type.
-    #[must_use]
-    pub fn get_canonical_type(&self) -> Type<'a> {
-        self.type_.get_canonical_type()
-    }
-
-    /// The underlying type after resolving pointers and arrays.
-    #[must_use]
-    pub fn get_underlying_type(&self) -> Type<'a> {
-        self.type_.get_underlying_type()
-    }
-}
-
-/* ─────────────────────────────── Helpers ──────────────────────────────── */
-
-/// Count pointer indirection depth. `int**` = 2, `int*` = 1, `int` = 0.
+/// Count pointer indirection depth.
+///
+/// - `int**` = 2
+/// - `int*` = 1
+/// - `int` = 0
 fn count_pointer_depth(canonical: &Type) -> usize {
     let mut depth = 0;
     let mut t = *canonical;
@@ -123,7 +129,8 @@ fn count_pointer_depth(canonical: &Type) -> usize {
     depth
 }
 
-/// Check if the canonical type is a function pointer (pointer to FunctionProto/FunctionNoProto).
+/// Check if the canonical type is a function pointer (pointer to
+/// [`TypeKind::FunctionPrototype`] or [`TypeKind::FunctionNoPrototype`]).
 fn is_func_ptr(canonical: &Type) -> bool {
     canonical.get_pointee_type().is_some_and(|pointee| {
         matches!(

@@ -51,7 +51,7 @@ pub enum CallConv {
     /// - On ARM32/ARM64: WIP
     Cdecl,
 
-    /* ───────────────────── x86 — may I never see you again ──────────────────── */
+    /* ─────────────────────────────────── x86 ────────────────────────────────── */
     /// - On x86:
     ///     - First two arguments that fit in a DWORD (left-to-right) are passed in `ECX` and `EDX` respectively.
     ///     - Arguments larger than DWORD skip register assignment.
@@ -66,26 +66,6 @@ pub enum CallConv {
     ///     - Returns integer in `EAX`.
     Stdcall,
 }
-
-/* ─────────────────────────────── Conversions ────────────────────────────── */
-
-impl<'a> TryFrom<&Type<'a>> for CallConv {
-    type Error = FunctionError;
-
-    fn try_from(type_: &Type<'a>) -> Result<Self, Self::Error> {
-        let cc = type_
-            .get_calling_convention()
-            .ok_or(FunctionError::NoCallingConvention)?;
-        match cc {
-            clang::CallingConvention::Cdecl => Ok(Self::Cdecl),
-            clang::CallingConvention::Stdcall => Ok(Self::Stdcall),
-            clang::CallingConvention::Fastcall => Ok(Self::Fastcall),
-            _ => Err(FunctionError::NoCallingConvention),
-        }
-    }
-}
-
-/* ──────────────────────── Parameter assignment ─────────────────────────── */
 
 impl CallConv {
     /// Assign ABI locations to each parameter based on architecture and
@@ -115,6 +95,35 @@ impl CallConv {
             Arch::Amd64 => return_location_x64(return_type),
             Arch::X86 => ReturnLocation::Register(Register::X86Gpr(X86Gpr::Eax)),
             Arch::Arm64 | Arch::Arm => todo!("ARM return location"),
+        }
+    }
+}
+
+enum X64ParamClass {
+    /// Passed in a GPR (or on stack as 8-byte slot).
+    Integer,
+    /// Passed in an XMM register (or on stack as 8-byte slot).
+    Float,
+    /// Small aggregate (1/2/4/8 bytes) — treated like integer.
+    Aggregate,
+    /// Large aggregate — passed by pointer (indirect).
+    IndirectAggregate(usize),
+}
+
+/* ─────────────────────────────── Conversions ────────────────────────────── */
+
+impl<'a> TryFrom<&Type<'a>> for CallConv {
+    type Error = FunctionError;
+
+    fn try_from(type_: &Type<'a>) -> Result<Self, Self::Error> {
+        let cc = type_
+            .get_calling_convention()
+            .ok_or(FunctionError::NoCallingConvention)?;
+        match cc {
+            clang::CallingConvention::Cdecl => Ok(Self::Cdecl),
+            clang::CallingConvention::Stdcall => Ok(Self::Stdcall),
+            clang::CallingConvention::Fastcall => Ok(Self::Fastcall),
+            _ => Err(FunctionError::NoCallingConvention),
         }
     }
 }
@@ -190,18 +199,7 @@ fn x64_param_class(ty: &Type<'_>) -> X64ParamClass {
     }
 }
 
-enum X64ParamClass {
-    /// Passed in a GPR (or on stack as 8-byte slot).
-    Integer,
-    /// Passed in an XMM register (or on stack as 8-byte slot).
-    Float,
-    /// Small aggregate (1/2/4/8 bytes) — treated like integer.
-    Aggregate,
-    /// Large aggregate — passed by pointer (indirect).
-    IndirectAggregate(usize),
-}
-
-/* ─────────────────── Microsoft x64 calling convention ──────────────────── */
+/* ────────────── Resolve parameter ABI for calling conventions ───────────── */
 
 fn assign_x64_microsoft(param_types: &[Type<'_>]) -> Vec<ParamLocation> {
     // Stack offsets are relative to RSP at callee entry (after CALL pushed
@@ -267,8 +265,6 @@ fn assign_x64_microsoft(param_types: &[Type<'_>]) -> Vec<ParamLocation> {
         .collect()
 }
 
-/* ─────────────────────────── x86 cdecl ─────────────────────────────────── */
-
 fn assign_x86_cdecl(param_types: &[Type<'_>]) -> Vec<ParamLocation> {
     // Stack offsets are relative to ESP at callee entry (after CALL pushed
     // the return address, before any prologue instructions execute).
@@ -295,14 +291,10 @@ fn assign_x86_cdecl(param_types: &[Type<'_>]) -> Vec<ParamLocation> {
         .collect()
 }
 
-/* ─────────────────────────── x86 stdcall ───────────────────────────────── */
-
+// Same layout as cdecl — only difference is cleanup responsibility.
 fn assign_x86_stdcall(param_types: &[Type<'_>]) -> Vec<ParamLocation> {
-    // Same layout as cdecl — only difference is cleanup responsibility.
     assign_x86_cdecl(param_types)
 }
-
-/* ─────────────────────────── x86 fastcall ──────────────────────────────── */
 
 fn assign_x86_fastcall(param_types: &[Type<'_>]) -> Vec<ParamLocation> {
     // Stack offsets are relative to ESP at callee entry (see assign_x86_cdecl).
@@ -340,7 +332,7 @@ fn assign_x86_fastcall(param_types: &[Type<'_>]) -> Vec<ParamLocation> {
         .collect()
 }
 
-/* ─────────────────────── x64 return location ───────────────────────────── */
+/* ─────────────────────────── x64 return location ────────────────────────── */
 
 fn return_location_x64(return_type: &Type<'_>) -> ReturnLocation {
     if is_float(return_type) {

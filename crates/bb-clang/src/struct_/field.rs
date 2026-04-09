@@ -117,24 +117,6 @@ impl<'a> Field<'a> {
     }
 }
 
-/* ──────────────────────────────── Utilities ─────────────────────────────── */
-
-/// Collects all field declarations from a struct/class entity.
-pub fn collect_fields<'a>(entity: &Entity<'a>) -> Vec<Field<'a>> {
-    use clang::EntityVisitResult;
-
-    let mut fields = Vec::new();
-    entity.visit_children(|child, _| {
-        if child.get_kind() == EntityKind::FieldDecl {
-            if let Ok(field) = Field::try_from((child, entity)) {
-                fields.push(field);
-            }
-        }
-        EntityVisitResult::Continue
-    });
-    fields
-}
-
 /* ─────────────────────────────── Conversions ────────────────────────────── */
 
 /// Generate [`Field`] from child-parent reference tuple, where the child is a [`EntityKind::FieldDecl`].
@@ -160,7 +142,7 @@ impl<'a> TryFrom<(Entity<'a>, &Entity<'a>)> for Field<'a> {
         let offset = parent_type
             .get_offsetof(&name)
             .map_err(|_| FieldError::NoOffset(name.clone()))?;
-        let location = SourceLocation::from_entity(&entity);
+        let location = SourceLocation::try_from(&entity).ok();
         let size = type_.get_sizeof().map_err(|_| FieldError::NoSize)?;
         let alignment = type_.get_alignof().map_err(|_| FieldError::NoAlignment)?;
 
@@ -177,4 +159,22 @@ impl<'a> TryFrom<(Entity<'a>, &Entity<'a>)> for Field<'a> {
             alignment,
         })
     }
+}
+
+/* ──────────────────────────────── Utilities ─────────────────────────────── */
+
+/// Collects all field declarations from a struct/class entity.
+pub fn collect_fields<'a>(entity: &Entity<'a>) -> Vec<Field<'a>> {
+    use clang::EntityVisitResult;
+
+    let mut fields = Vec::new();
+    entity.visit_children(|child, _| {
+        if child.get_kind() == EntityKind::FieldDecl {
+            if let Ok(field) = Field::try_from((child, entity)) {
+                fields.push(field);
+            }
+        }
+        EntityVisitResult::Continue
+    });
+    fields
 }

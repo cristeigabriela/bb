@@ -4,12 +4,14 @@
 //! hardware registers, and where values live at the ABI level.
 
 pub mod display;
+pub mod json;
 pub mod location;
 pub mod reg;
 
 use serde::Serialize;
 use thiserror::Error;
 
+pub use json::ToJson;
 pub use location::{MemoryOperand, ParamLocation, ReturnLocation};
 pub use reg::Register;
 

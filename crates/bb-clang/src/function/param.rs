@@ -111,7 +111,7 @@ impl<'a> TryFrom<Entity<'a>> for Param<'a> {
         let name = entity.get_name();
         let type_ = entity.get_type().ok_or(ParamError::NoType)?;
         let type_name = type_.get_display_name();
-        let location = SourceLocation::from_entity(&entity);
+        let location = SourceLocation::try_from(&entity).ok();
 
         let mut type_info = TypeInfo::from(type_);
         type_info.suppress_underlying_if_matches(Some(&type_name));

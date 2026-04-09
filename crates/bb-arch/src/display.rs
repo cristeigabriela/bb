@@ -1,12 +1,9 @@
 //! Display and serialization helpers for architecture types.
 
-use serde_json::json;
-
 use crate::Register;
-use crate::location::{MemoryOperand, ParamLocation, ReturnLocation};
 use crate::reg::{Arm32Gpr, Arm64Gpr, X64Gpr, X64Xmm, X86Gpr};
 
-/* ────────────────────────────── Register names ─────────────────────────── */
+/* ───────────────────────────── Register names ───────────────────────────── */
 
 /// Get the canonical display name for a register.
 #[must_use]
@@ -110,58 +107,5 @@ pub const fn register_name(reg: &Register) -> &'static str {
             Arm32Gpr::Lr => "LR",
             Arm32Gpr::Pc => "PC",
         },
-    }
-}
-
-/* ──────────────────────── ABI JSON serialization ────────────────────────── */
-
-/// Serialize a [`MemoryOperand`] to JSON.
-#[must_use]
-pub fn operand_to_json(op: &MemoryOperand) -> serde_json::Value {
-    match op {
-        MemoryOperand::Reg(r) => json!({
-            "kind": "reg",
-            "register": register_name(r),
-        }),
-        MemoryOperand::RegImm { base, offset } => json!({
-            "kind": "stack",
-            "base": register_name(base),
-            "offset": offset,
-        }),
-    }
-}
-
-/// Serialize a [`ParamLocation`] to JSON.
-#[must_use]
-pub fn param_abi_to_json(loc: &ParamLocation) -> serde_json::Value {
-    match loc {
-        ParamLocation::Direct { locations, size } => {
-            let mut obj = match locations.first() {
-                Some(op) => operand_to_json(op),
-                None => json!({ "kind": "?" }),
-            };
-            if let Some(map) = obj.as_object_mut() {
-                map.insert("size".into(), json!(size));
-            }
-            obj
-        }
-        ParamLocation::Indirect { pointer, size } => json!({
-            "kind": "indirect",
-            "pointer": operand_to_json(pointer),
-            "size": size,
-        }),
-    }
-}
-
-/// Serialize a [`ReturnLocation`] to JSON.
-#[must_use]
-pub fn return_abi_to_json(loc: &ReturnLocation) -> serde_json::Value {
-    match loc {
-        ReturnLocation::Void => json!({ "kind": "void" }),
-        ReturnLocation::Register(r) => json!({
-            "kind": "reg",
-            "register": register_name(r),
-        }),
-        ReturnLocation::Indirect => json!({ "kind": "indirect" }),
     }
 }

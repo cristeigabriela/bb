@@ -131,7 +131,7 @@ impl<'a> TryFrom<Entity<'a>> for Function<'a> {
         let return_type = type_.get_result_type().ok_or(FunctionError::NoReturnType)?;
         let return_type_name = return_type.get_display_name();
         let calling_convention = CallConv::try_from(&type_)?;
-        let location = SourceLocation::from_entity(&entity);
+        let location = SourceLocation::try_from(&entity).ok();
 
         // Compute return location.
         let return_location = calling_convention.return_location(arch, &return_type);

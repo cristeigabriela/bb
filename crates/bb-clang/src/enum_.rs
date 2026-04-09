@@ -126,7 +126,7 @@ impl<'a> TryFrom<Entity<'a>> for Enum<'a> {
 
         let constants = collect_enum_constants(&entity);
 
-        let location = SourceLocation::from_entity(&entity);
+        let location = SourceLocation::try_from(&entity).ok();
 
         Ok(Self {
             entity,

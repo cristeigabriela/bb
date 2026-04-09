@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::fmt::Write;
 
-use bb_arch::display::{param_abi_to_json, return_abi_to_json};
+use bb_arch::ToJson as AbiToJson;
 use bb_clang::display::{format_abi_param, format_return_location, format_tags};
 use bb_clang::{Constant, Function, Param, SourceLocation, ToJson};
 use bb_cli::terminal_width;
@@ -438,7 +438,7 @@ pub fn function_to_enriched_json(f: &Function, const_lookup: Option<&ConstantLoo
             // Replace raw abi_location with the enriched format.
             obj.remove("abi_location");
             obj.insert("index".into(), json!(i));
-            obj.insert("abi".into(), param_abi_to_json(p.get_abi_location()));
+            obj.insert("abi".into(), p.get_abi_location().to_json());
 
             // Add sparse metadata (directions, known constant values).
             let pm = meta.and_then(|m| p.get_name().and_then(|n| m.params.get(n)));
@@ -459,10 +459,7 @@ pub fn function_to_enriched_json(f: &Function, const_lookup: Option<&ConstantLoo
     let mut fj = f.to_json();
     let obj = fj.as_object_mut().unwrap();
     obj.insert("params".into(), json!(params));
-    obj.insert(
-        "return_abi".into(),
-        return_abi_to_json(f.get_return_location()),
-    );
+    obj.insert("return_abi".into(), f.get_return_location().to_json());
 
     if let Some(m) = meta {
         let api = m.metadata.as_ref();
