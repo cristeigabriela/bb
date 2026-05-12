@@ -1,0 +1,78 @@
+name: Version bump check
+
+# Asserts that any PR targeting master bumps the workspace package version
+# in Cargo.toml beyond what's currently on master.
+
+on:
+  pull_request:
+    branches:
+      - master
+    paths:
+      - 'Cargo.toml'
+      - '.github/workflows/version-check.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  check-version:
+    name: Workspace version > master
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          # Need master too so we can diff against it.
+          fetch-depth: 0
+
+      - name: Read PR version
+        id: pr
+        run: |
+          set -euo pipefail
+          pr_version=$(grep -oE '^version *= *"[^"]+"' Cargo.toml | head -n1 | sed -E 's/^version *= *"([^"]+)"/\1/')
+          echo "pr_version=$pr_version" >> "$GITHUB_OUTPUT"
+          echo "PR version: $pr_version"
+
+      - name: Read master version
+        id: base
+        run: |
+          set -euo pipefail
+          git fetch origin master --depth=1
+          master_version=$(git show origin/master:Cargo.toml | grep -oE '^version *= *"[^"]+"' | head -n1 | sed -E 's/^version *= *"([^"]+)"/\1/')
+          echo "master_version=$master_version" >> "$GITHUB_OUTPUT"
+          echo "master version: $master_version"
+
+      - name: Compare versions
+        env:
+          PR_VERSION: ${{ steps.pr.outputs.pr_version }}
+          MASTER_VERSION: ${{ steps.base.outputs.master_version }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os, re, sys
+
+          def parse(v):
+              # Accept "X.Y.Z" and "X.Y.Z-pre". Compare core as (X, Y, Z) tuple
+              # of ints, then break ties via lexicographic pre-release: any
+              # pre-release sorts *below* the release (per semver).
+              m = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.\-]+))?", v.strip())
+              if not m:
+                  print(f"::error::Cannot parse version: {v!r}", file=sys.stderr)
+                  sys.exit(2)
+              x, y, z = int(m[1]), int(m[2]), int(m[3])
+              pre = m[4]
+              return (x, y, z, 0 if pre else 1, pre or "")
+
+          pr = os.environ["PR_VERSION"]
+          base = os.environ["MASTER_VERSION"]
+          pr_key, base_key = parse(pr), parse(base)
+
+          if pr_key > base_key:
+              print(f"OK: PR version {pr} > master {base}")
+              sys.exit(0)
+          if pr_key == base_key:
+              print(f"::error::PR version {pr} is the same as master ({base}). Bump the workspace.package.version in Cargo.toml.")
+              sys.exit(1)
+          print(f"::error::PR version {pr} is lower than master {base}. The workspace.package.version cannot regress.")
+          sys.exit(1)
+          PY

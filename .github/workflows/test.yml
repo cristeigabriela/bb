@@ -25,12 +25,14 @@ jobs:
       - name: Set up MSVC environment
         uses: ilammy/msvc-dev-cmd@v1
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
       - name: Initialize submodules
         run: .\update-submodules.ps1
         shell: pwsh
-
-      - name: Install sparse Python dependencies
-        run: py -3 -m pip install -r crates/bb-sparse/sparse/requirements.txt
 
       - name: Rust Cache
         uses: swatinem/rust-cache@v2

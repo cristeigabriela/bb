@@ -53,7 +53,7 @@ bb-arch ← bb-clang ← bb-sdk ← bb-cli
 
 ## Building
 
-Requires MSVC build tools, LLVM/Clang (libclang.dll >= 18.1), Python >= 3.9, Rust 2024 edition.
+Requires MSVC build tools, LLVM/Clang (libclang.dll >= 18.1), Rust 2024 edition, and [uv](https://docs.astral.sh/uv/) (preferred) or Python >= 3.10. `uv` is used by `crates/bb-sparse/sparse` to manage its Python deps; bb-sparse's build.rs falls back to plain `python` / `py -3` if `uv` isn't on PATH.
 
 ```powershell
 # On Windows, MSVC link.exe must be on PATH before Git's /usr/bin/link.exe
@@ -63,14 +63,15 @@ Requires MSVC build tools, LLVM/Clang (libclang.dll >= 18.1), Python >= 3.9, Rus
 cargo build --release
 ```
 
-The `bb-sparse` build.rs auto-generates MSDN metadata from the sparse submodule (Python required). The `bb-sdk` build.rs auto-generates phnt.h from the phnt submodule. Both cache results and skip regeneration when the submodule hasn't changed.
+The `bb-sparse` build.rs auto-generates MSDN metadata from the sparse submodule in **two passes** — one for the SDK dataset (`sdk-api`, user-mode Win32 APIs) and one for the driver dataset (`windows-driver-docs-ddi`, KMDF/UMDF + kernel DDIs). Each pass is cached independently against its own submodule HEAD; only the pass whose submodule moved is rebuilt. The `bb-sdk` build.rs auto-generates phnt.h from the phnt submodule.
 
 ### Environment variable overrides
 
 | Variable | Purpose |
 |----------|---------|
 | `BB_PHNT_HEADER` | Use a custom phnt.h instead of generating from submodule |
-| `BB_SPARSE_JSON` | Use a pre-generated sparse.json instead of running Python |
+| `BB_SPARSE_SDK_JSON` | Use a pre-generated `sdk-api.json` instead of running sparse in SDK mode (alias: `BB_SPARSE_JSON`) |
+| `BB_SPARSE_DRIVER_JSON` | Use a pre-generated `driver-docs.json` instead of running sparse in driver mode |
 
 ## Running tests
 
@@ -135,10 +136,10 @@ Files using trailing underscores (`struct_/`, `enum_/`, `macro_.rs`) follow the 
 
 | Path | Repo | Purpose |
 |------|------|---------|
-| `crates/bb-sparse/sparse` | cristeigabriela/sparse | MSDN API metadata generator |
+| `crates/bb-sparse/sparse` | cristeigabriela/sparse (tracks `main`) | MSDN API metadata generator — embeds both sdk-api and windows-driver-docs-ddi |
 | `crates/bb-sdk/phnt` | mrexodia/phnt-single-header | PHNT NT header generator |
 
-Both have nested submodules (sdk-api, systeminformer). Use `.\update-submodules.ps1` to manage them.
+`sparse` has two nested submodules (sdk-api, windows-driver-docs-ddi); `phnt` has one (systeminformer). Use `.\update-submodules.ps1` to manage them.
 
 ## Self-maintenance
 

@@ -28,11 +28,35 @@ function Update-Sparse {
     git submodule update --init crates/bb-sparse/sparse
     if ($LASTEXITCODE -ne 0) { throw "Failed to update sparse submodule" }
 
-    Write-Host "Updating sparse/sdk-api nested submodule..." -ForegroundColor Cyan
+    # Initialize sparse's nested data submodules: sdk-api (user-mode Win32)
+    # and windows-driver-docs-ddi (KMDF/UMDF + kernel DDIs). Both are needed
+    # so bb-sparse can embed metadata for both modes.
     Push-Location crates/bb-sparse/sparse
-    git submodule update --init sdk-api
-    if ($LASTEXITCODE -ne 0) { Pop-Location; throw "Failed to update sdk-api submodule" }
-    Pop-Location
+    try {
+        Write-Host "Updating sparse/sdk-api nested submodule..." -ForegroundColor Cyan
+        git submodule update --init sdk-api
+        if ($LASTEXITCODE -ne 0) { throw "Failed to update sdk-api submodule" }
+
+        Write-Host "Updating sparse/windows-driver-docs-ddi nested submodule..." -ForegroundColor Cyan
+        git submodule update --init windows-driver-docs-ddi
+        if ($LASTEXITCODE -ne 0) { throw "Failed to update windows-driver-docs-ddi submodule" }
+
+        # `uv sync` pulls sparse's Python dependencies into a local virtualenv
+        # so `uv run python sparse.py ...` works during the bb-sparse build.
+        # If uv isn't installed, fall back gracefully — bb-sparse's build.rs
+        # will retry with plain `python` and surface a warning.
+        $uv = Get-Command uv -ErrorAction SilentlyContinue
+        if ($null -ne $uv) {
+            Write-Host "Syncing sparse Python dependencies via uv..." -ForegroundColor Cyan
+            uv sync --frozen
+            if ($LASTEXITCODE -ne 0) { throw "uv sync failed" }
+        } else {
+            Write-Host "uv not found on PATH — skipping `uv sync`." -ForegroundColor Yellow
+            Write-Host "  Install uv (https://docs.astral.sh/uv/) for the fastest build path." -ForegroundColor Yellow
+        }
+    } finally {
+        Pop-Location
+    }
 
     Write-Host "sparse submodule ready." -ForegroundColor Green
 }

@@ -1,11 +1,23 @@
 //! Embedded Windows API metadata from [sparse](https://github.com/cristeigabriela/sparse).
 //!
 //! Provides offline lookup of function-level documentation metadata extracted
-//! from Microsoft's sdk-api repository: library/DLL info, version requirements,
-//! parameter directions, and known constant values.
+//! from Microsoft's `sdk-api` repository (user-mode Win32 APIs) **and**
+//! `windows-driver-docs-ddi` (KMDF/UMDF and kernel DDIs): library/DLL info,
+//! version requirements, parameter directions, known constant values, plus
+//! driver-specific fields like IRQL constraints and KMDF/UMDF version tags.
 //!
-//! The JSON data is gzip-compressed at build time and decompressed lazily on
-//! first access.
+//! Two JSON blobs are gzip-compressed at build time and decompressed lazily
+//! on first access. SDK and driver entries live in the same lookup space —
+//! [`lookup`] checks SDK first then driver (their function-name spaces are
+//! largely disjoint). Use [`lookup_sdk`] / [`lookup_driver`] for an explicit
+//! per-source query.
+//!
+//! Driver-only metadata (IRQL, KMDF/UMDF version, `target-type`, etc.) is
+//! exposed via [`FuncMetadata::driver`], which returns `Some(&DriverMetadata)`
+//! only for entries that came from the driver dataset. SDK entries always
+//! return `None` here, even if the source JSON were to contain stray fields.
+//!
+//! See `bb-sparse/sparse` for the upstream parser and JSON schema.
 
 use std::collections::HashMap;
 use std::io::Read;
@@ -15,6 +27,15 @@ use flate2::read::GzDecoder;
 use serde::Deserialize;
 
 /* ────────────────────────────────── Types ───────────────────────────────── */
+
+/// Which sparse dataset a [`FuncMetadata`] entry came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Source {
+    /// MicrosoftDocs/sdk-api — user-mode Win32 APIs.
+    Sdk,
+    /// MicrosoftDocs/windows-driver-docs-ddi — kernel / WDF DDIs.
+    Driver,
+}
 
 /// Metadata for a single Windows API function, sourced from MSDN documentation.
 ///
@@ -43,6 +64,50 @@ pub struct FuncMetadata {
     /// Per-parameter metadata, keyed by parameter name.
     #[serde(default)]
     pub params: HashMap<String, ParamMetadata>,
+
+    /// Internal slot for driver-only fields. Always `None` for SDK entries.
+    /// Public access goes through [`FuncMetadata::driver`], which enforces
+    /// the source check.
+    #[serde(skip)]
+    driver: Option<DriverMetadata>,
+
+    /// Which dataset this entry came from. Populated at load time; never
+    /// present in the source JSON.
+    #[serde(skip)]
+    pub source: Option<Source>,
+}
+
+/// Driver-mode-only metadata from `windows-driver-docs-ddi` frontmatter.
+///
+/// Only present on entries returned by [`lookup_driver`] (or by [`lookup`]
+/// when the SDK dataset doesn't have a matching name).
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct DriverMetadata {
+    /// `req.include-header` from the page frontmatter.
+    #[serde(default)]
+    pub include_header: serde_json::Value,
+    /// `req.target-type` (e.g., `"Universal"`, `"Desktop"`).
+    #[serde(default)]
+    pub target_type: serde_json::Value,
+    /// `req.construct-type` (e.g., `"function"`, `"macro"`, `"method"`).
+    #[serde(default)]
+    pub construct_type: serde_json::Value,
+    /// `req.kmdf-ver` — minimum KMDF version string.
+    #[serde(default)]
+    pub kmdf_ver: serde_json::Value,
+    /// `req.umdf-ver` — minimum UMDF version string.
+    #[serde(default)]
+    pub umdf_ver: serde_json::Value,
+    /// `tech.root` — top-level driver tech category (e.g., `"storage"`).
+    #[serde(default)]
+    pub tech_root: serde_json::Value,
+    /// Normalized IRQL constraint: `{ "level": "...", "op": "<=" }` or `null`.
+    #[serde(default)]
+    pub irql: Option<IrqlConstraint>,
+    /// Raw IRQL string before normalization (for entries the grammar
+    /// couldn't parse).
+    #[serde(default)]
+    pub irql_raw: serde_json::Value,
 }
 
 /// API-level metadata from the MSDN documentation frontmatter.
@@ -54,6 +119,9 @@ pub struct ApiMetadata {
     /// Documentation title.
     #[serde(default)]
     pub title: serde_json::Value,
+    /// Short description from the page intro.
+    #[serde(default)]
+    pub description: serde_json::Value,
     /// API classification (e.g., `["DllExport"]`). May contain nulls.
     #[serde(default)]
     pub api_type: Vec<serde_json::Value>,
@@ -63,6 +131,19 @@ pub struct ApiMetadata {
     /// Function name variants (e.g., `["CreateFile", "CreateFileA", "CreateFileW"]`).
     #[serde(default)]
     pub api_name: Vec<serde_json::Value>,
+}
+
+/// Normalized IRQL constraint.
+///
+/// `level` is one of: `PASSIVE_LEVEL`, `APC_LEVEL`, `DISPATCH_LEVEL`,
+/// `DPC_LEVEL`, `DEVICE_LEVEL`, `DIRQL`, `HIGH_LEVEL`, `IPI_LEVEL`,
+/// or `ANY`. `op` is one of `<`, `<=`, `=`, `==`, `>=`, `>` or `None`
+/// for an exact-or-implicit match.
+#[derive(Debug, Clone, Deserialize)]
+pub struct IrqlConstraint {
+    pub level: String,
+    #[serde(default)]
+    pub op: Option<String>,
 }
 
 /// Per-parameter metadata from MSDN documentation.
@@ -127,6 +208,50 @@ impl FuncMetadata {
     pub fn min_server_str(&self) -> Option<&str> {
         self.min_server_version.as_str()
     }
+    /// Driver-only metadata, only present for entries from the driver dataset.
+    /// Returns `None` for SDK entries.
+    #[must_use]
+    pub fn driver(&self) -> Option<&DriverMetadata> {
+        self.driver.as_ref()
+    }
+}
+
+impl DriverMetadata {
+    /// `req.include-header`, if available.
+    #[must_use]
+    pub fn include_header_str(&self) -> Option<&str> {
+        self.include_header.as_str()
+    }
+    /// `req.target-type`, if available.
+    #[must_use]
+    pub fn target_type_str(&self) -> Option<&str> {
+        self.target_type.as_str()
+    }
+    /// `req.construct-type`, if available.
+    #[must_use]
+    pub fn construct_type_str(&self) -> Option<&str> {
+        self.construct_type.as_str()
+    }
+    /// Minimum KMDF version, if available.
+    #[must_use]
+    pub fn kmdf_ver_str(&self) -> Option<&str> {
+        self.kmdf_ver.as_str()
+    }
+    /// Minimum UMDF version, if available.
+    #[must_use]
+    pub fn umdf_ver_str(&self) -> Option<&str> {
+        self.umdf_ver.as_str()
+    }
+    /// Tech root (e.g., `"storage"`), if available.
+    #[must_use]
+    pub fn tech_root_str(&self) -> Option<&str> {
+        self.tech_root.as_str()
+    }
+    /// Raw IRQL string before normalization, if any.
+    #[must_use]
+    pub fn irql_raw_str(&self) -> Option<&str> {
+        self.irql_raw.as_str()
+    }
 }
 
 impl ApiMetadata {
@@ -140,6 +265,11 @@ impl ApiMetadata {
     pub fn names(&self) -> Vec<String> {
         values_as_strings(&self.api_name)
     }
+    /// Get the short description, if present.
+    #[must_use]
+    pub fn description_str(&self) -> Option<&str> {
+        self.description.as_str()
+    }
 }
 
 impl ParamMetadata {
@@ -152,46 +282,128 @@ impl ParamMetadata {
 
 /* ──────────────────────── Compressed data embedding ────────────────────── */
 
-/// The gzip-compressed sparse JSON, embedded at compile time.
-/// If no data file was present at build time, this is an empty slice.
-static COMPRESSED_DATA: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/sparse.json.gz"));
+/// Gzip-compressed sparse JSON for the SDK dataset, embedded at compile time.
+/// Empty when no data was available at build time.
+static COMPRESSED_SDK: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/sparse_sdk.json.gz"));
 
-/// Lazily decompressed and deserialized lookup table.
-static LOOKUP: OnceLock<HashMap<String, FuncMetadata>> = OnceLock::new();
+/// Gzip-compressed sparse JSON for the driver dataset, embedded at compile time.
+static COMPRESSED_DRIVER: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/sparse_driver.json.gz"));
 
-fn load_lookup() -> HashMap<String, FuncMetadata> {
-    if COMPRESSED_DATA.is_empty() {
+/// SDK-only lookup table.
+static LOOKUP_SDK: OnceLock<HashMap<String, FuncMetadata>> = OnceLock::new();
+/// Driver-only lookup table.
+static LOOKUP_DRIVER: OnceLock<HashMap<String, FuncMetadata>> = OnceLock::new();
+
+fn decompress(data: &[u8]) -> Option<String> {
+    if data.is_empty() {
+        return None;
+    }
+    let mut decoder = GzDecoder::new(data);
+    let mut out = String::new();
+    decoder
+        .read_to_string(&mut out)
+        .expect("failed to decompress sparse data");
+    Some(out)
+}
+
+fn load(data: &[u8], source: Source) -> HashMap<String, FuncMetadata> {
+    let Some(json) = decompress(data) else {
         return HashMap::new();
+    };
+
+    let mut map: HashMap<String, FuncMetadata> =
+        serde_json::from_str(&json).expect("failed to parse sparse JSON");
+
+    // Driver-only metadata is gated behind the source: deserialize the same
+    // JSON a second time into DriverMetadata and attach to each entry. This
+    // keeps the FuncMetadata struct uniform while ensuring driver fields are
+    // *only* exposed for driver-source entries.
+    if matches!(source, Source::Driver) {
+        let raw: HashMap<String, DriverMetadata> =
+            serde_json::from_str(&json).expect("failed to parse driver metadata");
+        for (name, dm) in raw {
+            if let Some(entry) = map.get_mut(&name) {
+                entry.driver = Some(dm);
+            }
+        }
     }
 
-    let mut decoder = GzDecoder::new(COMPRESSED_DATA);
-    let mut json_str = String::new();
-    decoder
-        .read_to_string(&mut json_str)
-        .expect("failed to decompress sparse data");
+    for v in map.values_mut() {
+        v.source = Some(source);
+    }
+    map
+}
 
-    serde_json::from_str(&json_str).expect("failed to parse sparse JSON")
+fn sdk_lookup() -> &'static HashMap<String, FuncMetadata> {
+    LOOKUP_SDK.get_or_init(|| load(COMPRESSED_SDK, Source::Sdk))
+}
+
+fn driver_lookup() -> &'static HashMap<String, FuncMetadata> {
+    LOOKUP_DRIVER.get_or_init(|| load(COMPRESSED_DRIVER, Source::Driver))
 }
 
 /* ─────────────────────────── Public API ─────────────────────────────────── */
 
 /// Look up metadata for a function by name.
 ///
-/// Returns `None` if the function is not in the sparse database, or if
-/// no sparse data was embedded at build time.
+/// Checks the SDK dataset first, then the driver dataset. The two
+/// function-name spaces are largely disjoint (user-mode Win32 vs.
+/// kernel/WDF DDIs) so collisions are rare; when one happens, SDK wins.
+///
+/// Returns `None` if the function isn't in either dataset, or if no
+/// sparse data was embedded at build time.
 #[must_use]
 pub fn lookup(name: &str) -> Option<&'static FuncMetadata> {
-    LOOKUP.get_or_init(load_lookup).get(name)
+    sdk_lookup()
+        .get(name)
+        .or_else(|| driver_lookup().get(name))
 }
 
-/// Returns `true` if sparse data was embedded at build time.
+/// Look up metadata for a function by name in the SDK dataset only.
+#[must_use]
+pub fn lookup_sdk(name: &str) -> Option<&'static FuncMetadata> {
+    sdk_lookup().get(name)
+}
+
+/// Look up metadata for a function by name in the driver dataset only.
+#[must_use]
+pub fn lookup_driver(name: &str) -> Option<&'static FuncMetadata> {
+    driver_lookup().get(name)
+}
+
+/// Returns `true` if **any** sparse data was embedded at build time.
 #[must_use]
 pub fn is_available() -> bool {
-    !COMPRESSED_DATA.is_empty()
+    is_available_sdk() || is_available_driver()
 }
 
-/// Returns the number of functions in the sparse database.
+/// Returns `true` if the SDK dataset was embedded at build time.
+#[must_use]
+pub fn is_available_sdk() -> bool {
+    !COMPRESSED_SDK.is_empty()
+}
+
+/// Returns `true` if the driver dataset was embedded at build time.
+#[must_use]
+pub fn is_available_driver() -> bool {
+    !COMPRESSED_DRIVER.is_empty()
+}
+
+/// Total number of functions across both datasets.
 #[must_use]
 pub fn entry_count() -> usize {
-    LOOKUP.get_or_init(load_lookup).len()
+    entry_count_sdk() + entry_count_driver()
+}
+
+/// Number of functions in the SDK dataset.
+#[must_use]
+pub fn entry_count_sdk() -> usize {
+    sdk_lookup().len()
+}
+
+/// Number of functions in the driver dataset.
+#[must_use]
+pub fn entry_count_driver() -> usize {
+    driver_lookup().len()
 }
