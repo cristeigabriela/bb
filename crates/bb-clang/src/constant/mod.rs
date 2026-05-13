@@ -11,6 +11,7 @@ mod value;
 pub use macro_::{TuEntityMap, build_tu_entity_map};
 pub use value::{ConstLookup, ConstValue};
 
+use clang::source::SourceRange;
 use clang::token::Token;
 use clang::token::TokenKind;
 use clang::{Entity, EntityKind};
@@ -204,7 +205,7 @@ impl<'a> TryFrom<Entity<'a>> for Constant<'a> {
                 }
 
                 let range = entity.get_range().ok_or(ConstantError::NotEvaluable)?;
-                let tokens = range.tokenize();
+                let tokens = safe_tokenize(&range).ok_or(ConstantError::NotEvaluable)?;
                 let body = extract_body_tokens(&tokens);
                 let cexpr_tokens: Vec<_> = tokens.iter().map(clang_to_cexpr_token).collect();
 
@@ -293,7 +294,7 @@ fn is_word_token(s: &str) -> bool {
 /// For var decls, skips everything up to and including `=`.
 fn extract_expression_from_entity(entity: &Entity) -> Option<String> {
     let range = entity.get_range()?;
-    let tokens = range.tokenize();
+    let tokens = safe_tokenize(&range)?;
     // Find the `=` separator and take everything after it.
     let eq_pos = tokens.iter().position(|t| t.get_spelling() == "=")?;
     let expr_tokens: Vec<_> = tokens[eq_pos + 1..]
@@ -313,6 +314,33 @@ fn extract_expression_from_entity(entity: &Entity) -> Option<String> {
         out.push_str(s);
     }
     Some(out)
+}
+
+/* ────────────────────────────── safe_tokenize ──────────────────────────── */
+
+/// Wrap [`SourceRange::tokenize`] to drop ranges where `clang_tokenize`
+/// returns zero tokens.
+///
+/// **Why:** clang-rs 2.0.0 reads uninitialized memory for the token array
+/// pointer when `clang_tokenize` writes `count == 0`. Rust 1.78+'s
+/// `slice::from_raw_parts` precondition check turns that into a
+/// non-unwinding abort (uncatchable by `catch_unwind`). The trigger we've
+/// seen in kernel-mode parses is *inverted* source ranges (`end.offset <
+/// start.offset`), produced by some synthesized/intrinsic declarations in
+/// `wdm.h` / `ntddk.h`. Detecting `end <= start` (within a single file)
+/// before calling `.tokenize()` avoids the bad branch entirely.
+///
+/// Returns `None` when the range is missing a file, spans multiple files,
+/// or is empty/inverted.
+pub(crate) fn safe_tokenize<'tu>(range: &SourceRange<'tu>) -> Option<Vec<Token<'tu>>> {
+    let start = range.get_start().get_file_location();
+    let end = range.get_end().get_file_location();
+    // Both endpoints must be in the same file, and the range must cover at
+    // least one character.
+    match (start.file, end.file) {
+        (Some(sf), Some(ef)) if sf == ef && end.offset > start.offset => Some(range.tokenize()),
+        _ => None,
+    }
 }
 
 /* ───────────────────────────── Type utilities ───────────────────────────── */

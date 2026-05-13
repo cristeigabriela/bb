@@ -13,6 +13,7 @@ use std::collections::{HashMap, HashSet};
 use clang::token::{Token, TokenKind};
 use clang::{Entity, EntityKind, TranslationUnit};
 
+use super::safe_tokenize;
 use super::tokens::clang_to_cexpr_token;
 use crate::error::ConstantError;
 use crate::location::SourceLocation;
@@ -95,7 +96,10 @@ impl<'a> Constant<'a> {
             resolving.remove(&name);
             ConstantError::NotEvaluable
         })?;
-        let tokens = range.tokenize();
+        let tokens = safe_tokenize(&range).ok_or_else(|| {
+            resolving.remove(&name);
+            ConstantError::NotEvaluable
+        })?;
 
         // First token is the macro name itself.
         let mut cexpr_tokens = vec![clang_to_cexpr_token(&tokens[0])];
