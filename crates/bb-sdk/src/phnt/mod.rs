@@ -1,8 +1,6 @@
 //! Module for working with PHNT from a developer command prompt environment.
 
-mod kernel;
-mod user;
-
+use crate::winsdk::{SdkMode, sdk_header};
 use clap::ValueEnum;
 
 /* ────────────────────────────────── Types ───────────────────────────────── */
@@ -90,28 +88,31 @@ const PHNT_INCLUDES: &[&str] = &["assert.h"];
 
 /// Generate a synthetic header that includes PHNT with the specified version.
 ///
-/// PHNT requires base Windows types (ULONG, `LIST_ENTRY`, PVOID, etc.) to be defined.
-/// We include the appropriate base header depending on mode:
-/// - User mode: `<windows.h>` provides all needed types
-/// - Kernel mode: `<ntdef.h>` from WDK provides base types
+/// PHNT mode = the same SDK umbrella as plain `--mode user` / `--mode kernel`
+/// (via [`sdk_header`]) with `PHNT_VERSION` plus the phnt.h superset on top.
+/// Coverage stays in sync with the winsdk groups.
 #[must_use]
 pub fn phnt_synthetic_header(version: PhntVersion, kernel_mode: bool) -> String {
     use std::fmt::Write;
 
-    let mut out = String::new();
-
-    if kernel_mode {
-        for &(name, value) in kernel::DEFINES {
-            let _ = writeln!(out, "#define {name} {value}");
-        }
-        for inc in kernel::INCLUDES {
-            let _ = writeln!(out, "#include <{inc}>");
-        }
+    let mode = if kernel_mode {
+        SdkMode::Kernel
     } else {
-        for inc in user::INCLUDES {
-            let _ = writeln!(out, "#include <{inc}>");
-        }
-    }
+        SdkMode::User
+    };
+
+    // Start with the full mode-appropriate SDK umbrella (defines + every
+    // group of public headers we curate in winsdk/{user,kernel}.rs), then
+    // strip a few headers that fight phnt.h directly:
+    //
+    // - `winternl.h`: phnt.h errors out with "Do not mix Winternl.h and
+    //   phnt.h" — its private NT API set is a superset of winternl's
+    //   redacted public surface.
+    // - `winusb.h`: pulls `shared/usb.h` whose stub `typedef PVOID PIRP`
+    //   conflicts with phnt's real `typedef struct _IRP *PIRP`.
+    let mut out = sdk_header(mode)
+        .replace("#include <winternl.h>\n", "")
+        .replace("#include <winusb.h>\n", "");
 
     let _ = writeln!(out, "#define PHNT_VERSION {}", version.macro_name());
 

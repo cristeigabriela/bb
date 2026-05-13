@@ -10,3 +10,5 @@ clang.workspace = true
 clap.workspace = true
 anyhow.workspace = true
 colored.workspace = true
+dirs.workspace = true
+sha2.workspace = true
