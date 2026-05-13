@@ -13,6 +13,125 @@
 
 use bb_sparse::{Entry, Metadata};
 
+/* ─────────── One-off coverage probe (not part of CI) ──────────────────────
+ *
+ * Run with:
+ *   cargo test -p bb-tests sparse_coverage_dump -- --ignored --nocapture --test-threads=1
+ *
+ * For each sparse entry whose header is known, ask bb-funcs whether it's
+ * visible in the current default bb-sdk umbrella (parsed via the standard
+ * config + the macro-preprocessed TU). Aggregate misses by header to show
+ * where the next batch of `bb-sdk` header additions would pay off.
+ */
+
+#[test]
+#[ignore]
+fn sparse_coverage_dump() -> anyhow::Result<()> {
+    use bb_sdk::{Arch, HeaderConfig, SdkMode};
+    use clang::{Clang, EntityKind, Index};
+    use std::collections::{BTreeMap, HashSet};
+
+    fn collect_visible(mode: SdkMode) -> HashSet<String> {
+        let cfg = HeaderConfig::winsdk(Arch::Amd64, mode).expect("sdk");
+        let clang = Clang::new().unwrap();
+        let index = Index::new(&clang, false, false);
+        let tu = cfg.parse(&index, true).expect("parse");
+        let mut names = HashSet::new();
+        for e in tu.get_entity().get_children() {
+            if matches!(e.get_kind(), EntityKind::FunctionDecl)
+                && let Some(n) = e.get_name()
+            {
+                names.insert(n);
+            }
+        }
+        names
+    }
+
+    fn report(
+        label: &str,
+        visible: &HashSet<String>,
+        iter: impl Iterator<Item = (String, String)>,
+    ) {
+        let mut per_header: BTreeMap<String, (usize, usize, usize)> = BTreeMap::new();
+        let mut total_have = 0usize;
+        let mut total_miss_method = 0usize;
+        let mut total_miss_other = 0usize;
+        let mut sample_other: Vec<(String, String)> = Vec::new();
+        for (name, header) in iter {
+            let key = header
+                .split(',')
+                .next()
+                .unwrap_or(&header)
+                .trim()
+                .to_ascii_lowercase();
+            let entry = per_header.entry(key.clone()).or_insert((0, 0, 0));
+            if visible.contains(&name) {
+                entry.0 += 1;
+                total_have += 1;
+            } else if name.contains("::") {
+                entry.1 += 1;
+                total_miss_method += 1;
+            } else {
+                entry.2 += 1;
+                total_miss_other += 1;
+                if sample_other.len() < 40 {
+                    sample_other.push((name, key));
+                }
+            }
+        }
+        let total = total_have + total_miss_method + total_miss_other;
+        println!("===== {label} =====");
+        println!("  have:       {total_have}");
+        println!("  miss (::):  {total_miss_method}   <- COM interface methods");
+        println!("  miss (free):{total_miss_other}   <- actual free-function misses");
+        println!(
+            "  ratio incl. methods: {:.1}%",
+            100.0 * total_have as f64 / total.max(1) as f64
+        );
+        println!(
+            "  ratio free-only:     {:.1}%",
+            100.0 * total_have as f64 / (total_have + total_miss_other).max(1) as f64
+        );
+        let mut rows: Vec<_> = per_header.into_iter().collect();
+        rows.sort_by(|a, b| b.1.2.cmp(&a.1.2));
+        println!("Top headers by free-function miss:");
+        println!(
+            "{:<32}{:>8}{:>10}{:>10}",
+            "header", "have", "miss(::)", "miss(free)"
+        );
+        for (h, (have, method_miss, free_miss)) in rows.iter().take(40) {
+            if *free_miss == 0 {
+                continue;
+            }
+            println!("{h:<32}{have:>8}{method_miss:>10}{free_miss:>10}");
+        }
+        println!("Sample of free-function misses (name <- header):");
+        for (n, h) in sample_other.iter().take(30) {
+            println!("  {n:<40} {h}");
+        }
+    }
+
+    let visible_user = collect_visible(SdkMode::User);
+    report(
+        "USER vs sparse SDK",
+        &visible_user,
+        bb_sparse::iter_sdk()
+            .filter_map(|(name, m)| m.header_str().map(|h| (name.to_string(), h.to_string()))),
+    );
+
+    let visible_kernel = collect_visible(SdkMode::Kernel);
+    report(
+        "KERNEL vs sparse driver",
+        &visible_kernel,
+        bb_sparse::iter_driver().filter_map(|(name, m)| {
+            m.include_header_str()
+                .map(|h| (name.to_string(), h.to_string()))
+        }),
+    );
+
+    Ok(())
+}
+
 /* ───────────────────────────── Smoke invariants ─────────────────────────── */
 
 #[test]

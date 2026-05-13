@@ -305,11 +305,54 @@ error: no structs matching '_PBE'
 
 Uses whatever version is available in your Developer Command Prompt environment.
 
-Covers **user-mode** headers (`windows.h`, `winternl.h`, `dbghelp.h`, crypto, networking, shell, COM, etc.) and **kernel-mode** headers (`ntddk.h`, `wdm.h`, `ntifs.h`, `fltkernel.h`, etc.)
+<details>
+<summary><b>User mode</b> — Win32 + COM IDL surface (click to expand)</summary>
+
+Winsock 2, networking (winhttp, wininet, iphlpapi, dhcpsapi, dns, ldap, snmp, ws2spi, http server, p2p alt, mprapi, rtmv2), security (acl, sddl, wincrypt, bcrypt, ncrypt, authz, wintrust, certenroll, cryptxml, slpublic, msdrm, winbio), shell/UI (shobjidl, shobjidl_core, commctrl, commdlg, uxtheme, dwmapi, magnification, prsht, interactioncontext, winwlx, highlevelmonitorconfigurationapi), GDI helpers (icm, fci), Media Foundation (mfapi, mfidl, mfreadwrite, mfmediaengine), Core Audio (mmdeviceapi, audioclient, audiopolicy), DirectShow (strmif, vfw), Direct3D 11/12 + DXGI 1.6 + d3dcompiler, UI Automation, Bluetooth, XInput, ETW + TraceLogging + TDH, BITS, Windows Update, MSI (msi, msiquery), Task Scheduler, DBGENG (debugger engine), AD (iads, adshlp, dsgetdc), PDH, WIA, WMP, COM+ (azroles, comsvcs, xpsobjectmodel, msinkaut, tom), virtdisk, fltuser (filter manager user side), peerdist, EAP (eapmethodpeerapis), WinUSB, projfs, WER, WMI consumers (wbemcli), Image helpers (traceloggingprovider, perflib), LM DFS, pathcch, traffic, sphelper (excluded — see notes), strsafe, intsafe, ntmsapi, mscat, drt, npapi, wdspxe / wdstpdi / wdsclientapi, roerrorapi, wtsapi32, lmaccess, setupapi, cfgmgr32, wlanapi + ras + rasdlg, powrprof, gpedit, oleauto, appmodel, hbaapi, propvarutil, propsys, traffic, mstcpip, windns, wincred, userenv, ktmw32, sapi, cfapi, diagnosticdataquery, clfsw32, usp10, winevt, …
+
+</details>
+
+<details>
+<summary><b>Kernel mode</b> — NT / WDF / NDIS / streaming (click to expand)</summary>
+
+Built on the `ntifs.h` umbrella (which transitively pulls `ntddk.h`, `wdm.h`, in the right order so `PEPROCESS` / `PETHREAD` don't redefine). On top of that: `ntstrsafe`, `wsk` (Winsock Kernel), `fltkernel` (minifilter), `aux_klib`, `usb` + `usbdi` + `usbdlib`, **WDF** (`wdf.h`, `wdfusb.h` — KMDF version auto-discovered from `Include/wdf/kmdf/<ver>/`), **NetAdapterCx** (modern NDIS-on-WDF — also version-discovered from `Include/<sdkver>/km/netcx/kmdf/adapter/<ver>/`), `ndis`, kernel streaming (`ks`, `ksmedia`, `portcls`), HID (`hidpi`, `hidclass`, `hidsdi`, `hidusage`), `swenum`, `pep_x`, `ndischimney`.
+
+</details>
+
+<details>
+<summary><b>Excluded (with rationale)</b></summary>
+
+Each is documented inline in `crates/bb-sdk/src/winsdk/{user,kernel}.rs`:
+
+- **storport.h** — `ntddstor.h` ships without include guards, so it re-runs all `DEFINE_GUID(GUID_DEVINTERFACE_*, …)` and clang flags redefinitions.
+- **d3dkmthk.h / bdasup.h / fwpsk.h / ksproxy.h** — drag in COM `wtypes.h` whose `VARENUM` / `VT_EMPTY` enumerators collide with the ones `ks.h` already declares.
+- **video.h / miniport.h** — miniport.h redefines `_QUAD` and `_PROCESSOR_NUMBER` against the kernel core types in scope.
+- **dbghelp.h (kernel)** — pulls `minidumpapiset.h` which needs user-mode-only types (`VS_FIXEDFILEINFO`, `TIME_ZONE_INFORMATION`).
+- **wdbgexts.h** — clang resolves `<wdbgexts.h>` from `um/` before `km/`, and the user-mode header uses `LPTR` which isn't defined in the kernel chain.
+- **bthsdpddi.h** — implicit-int header bug.
+- **dwrite.h / rtworkq.h** — use C++ syntax (`static_cast`, untagged interface names) that won't parse in C mode.
+- **sphelper.h** — heavy C++ speech-API templates that balloon clang parse time from ~9 s to >4 min.
+- **tapi.h chain (tapi3if, tspi, winfax)** — C-mode parse errors in tapi.h itself, cascading to everything that pulls it.
+- **webservices.h** — two empty enums clang rejects in C mode.
+- **wsman.h** — needs `WSMAN_API_VERSION_1_0` / `_1_1` defined first; not wired up.
+- **security.h / sspi.h** — needs `SECURITY_WIN32`/`SECURITY_KERNEL`/`SECURITY_MAC` defined first.
+- **p2p.h** — not in modern SDK (`10.0.26100.0`).
+- **winddi.h / rpcproxy.h** — `HSEMAPHORE` typedef conflict + anonymous-struct C-mode error.
+- **resapi.h / iscsidsc.h** — `PHANDLER_ROUTINE` redef vs services API + missing `ISDSC_STATUS` definition.
+- **imagehlp.h** — struct redefs against `dbghelp.h` (which is the modern superset).
+- **wudfddi.h** — only in legacy `wdf/umdf/1.x/` trees; modern UMDF 2.x uses `wdf.h` directly.
+- **ntsecapi.h** — `LSA_UNICODE_STRING` / `LSA_STRING` collide with `winternl.h`'s `UNICODE_STRING` / `STRING`.
+- **udecx.h** — not shipped in all installed WDKs.
+
+</details>
 
 ```
-bb-types --mode kernel --winsdk --struct *DRIVER_OBJECT*
+bb-types  --mode kernel --winsdk --struct *DRIVER_OBJECT*
+bb-funcs  --mode kernel --name NetAdapterCreate
+bb-funcs  --mode kernel --name WdfCollectionAdd
 ```
+
+All four mode combinations (`--mode user`, `--mode kernel`, `--phnt`, `--phnt --mode kernel`) parse with **zero libclang errors and zero warnings** against the SDK 10.0.26100.0 + WDK 1.35 + NetCx 2.5. Add `--diagnostics` to any invocation to see clang output yourself.
 
 </td>
 <td width="50%" valign="top">
@@ -325,9 +368,22 @@ bb-types --phnt win11 --struct _PEB
 bb-consts --phnt --name "STATUS_*"
 ```
 
+**PHNT mode auto-inherits the full Windows SDK umbrella** — `phnt_synthetic_header` starts from `winsdk::sdk_header(mode)` and only strips the two headers that fight `phnt.h` directly (`winternl.h` — phnt errors `Do not mix Winternl.h and phnt.h`; `winusb.h` — `shared/usb.h` stubs `PIRP=PVOID` against phnt's real `_IRP`). Every coverage expansion in `winsdk/` automatically applies to `--phnt`.
+
 </td>
 </tr>
 </table>
+
+### Header coverage
+
+Measured against the documented MSDN free-function surface that `bb-sparse` embeds (`sdk-api` for user mode, `windows-driver-docs-ddi` for kernel) — see `cargo test -p bb-tests sparse_coverage_dump -- --ignored --nocapture` to run it yourself. Interface methods aren't counted because `bb-funcs` filters on `EntityKind::FunctionDecl`, and IDL vtables surface those as function-pointer fields inside `IFoo::Vtbl` structs.
+
+| mode      | funcs  | types  | consts | enums | free-func coverage |
+|-----------|--------|--------|--------|-------|--------------------|
+| user      | 15,701 | 15,808 | 44,966 | 2,926 | 75.2%              |
+| kernel    |  4,884 |  3,298 | 19,893 |   735 | 62.4%              |
+| phnt user | 17,424 | 17,338 | 48,073 | 3,167 | —                  |
+| phnt kern |  4,885 |  3,721 | 20,472 |   776 | —                  |
 
 ---
 

@@ -41,7 +41,7 @@ bb-cli = { path = "crates/bb-cli" }
 bb-sql = { path = "crates/bb-sql" }
 bb-tui = { path = "crates/bb-tui" }
 
-clang = { version = "2.0.0", features = ["clang_10_0"] }
+clang = { git = "https://github.com/KyleMayes/clang-rs", rev = "35b355e0bdfc52d37c7e93e814f54388d202dff1", features = ["clang_10_0"] }
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 thiserror = "2"

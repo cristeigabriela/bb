@@ -32,6 +32,87 @@ impl SdkInfo {
     pub fn get_version(&self) -> &str {
         &self.version
     }
+
+    /// Locate the newest installed WDF flavor under this SDK's include dir.
+    ///
+    /// `flavor` is `"kmdf"` for kernel-mode WDF or `"umdf"` for user-mode.
+    /// The SDK lays them out under `Include/wdf/<flavor>/<major>.<minor>/`
+    /// (these are NOT under the per-SDK-version `Include/<sdk-ver>/` tree).
+    /// Returns `None` if no WDF of that flavor is installed.
+    #[must_use]
+    pub fn wdf_latest(&self, flavor: &str) -> Option<WdfLocation> {
+        // `Include/wdf/<flavor>` is a sibling of `Include/<sdk-ver>`, not a
+        // child — climb out of the version dir before joining `wdf`.
+        let root = self.include_dir.parent()?.join("wdf").join(flavor);
+        latest_versioned_dir(&root, "wdf.h")
+    }
+
+    /// Locate the newest installed `NetAdapterCx` tree under this SDK's
+    /// include dir. The layout differs from WDF — `NetCx` is laid out
+    /// *inside* the per-SDK-version `km/netcx/kmdf/adapter/<M>.<N>/`
+    /// (siblings, public headers) plus `shared/netcx/shared/1.0/net/`
+    /// (the `net/*.h` types netadaptercx.h depends on).
+    ///
+    /// Returns the path to add to the `-I` search list and the version
+    /// numbers; the shared/net path is reported via [`netcx_shared_dir`].
+    #[must_use]
+    pub fn netcx_latest(&self) -> Option<WdfLocation> {
+        let root = self
+            .include_dir
+            .join("km")
+            .join("netcx")
+            .join("kmdf")
+            .join("adapter");
+        latest_versioned_dir(&root, "netadaptercx.h")
+    }
+
+    /// Companion to [`netcx_latest`]: the `shared/netcx/shared/<ver>/`
+    /// directory that supplies `net/extension.h`, `net/ring.h`, etc.
+    /// Currently only `1.0` exists, but we still discover it.
+    #[must_use]
+    pub fn netcx_shared_dir(&self) -> Option<PathBuf> {
+        let root = self.include_dir.join("shared").join("netcx").join("shared");
+        latest_versioned_dir(&root, "net/extension.h").map(|loc| loc.include_dir)
+    }
+}
+
+/// Walk a directory of `<major>.<minor>/` subdirs and return the one
+/// containing `marker` with the highest version.
+fn latest_versioned_dir(root: &PathBuf, marker: &str) -> Option<WdfLocation> {
+    let mut best: Option<((u32, u32), PathBuf)> = None;
+    for entry in std::fs::read_dir(root).ok()?.flatten() {
+        let name = entry.file_name();
+        let Some(name_str) = name.to_str() else {
+            continue;
+        };
+        let Some((maj, min)) = name_str.split_once('.') else {
+            continue;
+        };
+        let (Ok(maj), Ok(min)) = (maj.parse::<u32>(), min.parse::<u32>()) else {
+            continue;
+        };
+        let path = entry.path();
+        if path.join(marker).exists() {
+            let v = (maj, min);
+            if best.as_ref().is_none_or(|(b, _)| v > *b) {
+                best = Some((v, path));
+            }
+        }
+    }
+    best.map(|((major, minor), include_dir)| WdfLocation {
+        include_dir,
+        major,
+        minor,
+    })
+}
+
+/// One installed WDF version (KMDF or UMDF) discovered under the SDK root.
+#[derive(Debug, Clone)]
+pub struct WdfLocation {
+    /// `…/Include/wdf/<flavor>/<major>.<minor>/`
+    pub include_dir: PathBuf,
+    pub major: u32,
+    pub minor: u32,
 }
 
 /* ──────────────────────────────── Utilities ─────────────────────────────── */
@@ -158,10 +239,15 @@ struct HeaderGroup {
     includes: &'static [&'static str],
 }
 
-/// Preamble includes shared across modes.
-const PREAMBLE_INCLUDES: &[&str] = &["sdkddkver.h"];
-
 /// Build a header string from structured components.
+///
+/// Order: guarded `#define`s, raw `#define`s, then grouped `#include`s.
+/// Defines must come first so they apply when each header chain is parsed;
+/// in particular, kernel-mode `sdkddkver.h` (pulled in transitively by
+/// `ntddk.h` → `ntdef.h`) sees `DECLSPEC_DEPRECATED_DDK` already defined
+/// by `ntdef.h` and so populates the `DECLSPEC_DEPRECATED_DDK_WINXP`
+/// family wdm.h depends on. Pulling `sdkddkver.h` in via a preamble
+/// `#include` ran it before `ntdef.h` and left those macros undefined.
 fn build_header(
     guarded_defines: &[(&str, &str)],
     raw_defines: &[(&str, &str)],
@@ -170,11 +256,6 @@ fn build_header(
     use std::fmt::Write;
 
     let mut out = String::new();
-
-    for inc in PREAMBLE_INCLUDES {
-        let _ = writeln!(out, "#include <{inc}>");
-    }
-    out.push('\n');
 
     for &(name, value) in guarded_defines {
         let _ = writeln!(out, "#ifndef {name}");

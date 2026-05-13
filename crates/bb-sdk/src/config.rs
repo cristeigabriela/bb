@@ -133,12 +133,18 @@ impl HeaderConfig {
     ///
     /// This includes:
     /// - Target triple for the architecture
-    /// - Include paths for SDK directories
+    /// - Include paths for SDK directories (and the newest installed WDF
+    ///   flavor matching the mode — KMDF for kernel, UMDF for user)
     /// - Architecture-specific preprocessor defines
+    /// - `KMDF_VERSION_MAJOR` / `KMDF_VERSION_MINOR` (or UMDF_*) defines when
+    ///   the matching WDF flavor is installed
     #[must_use]
     pub fn clang_args(&self) -> Vec<String> {
-        let (arch, sdk) = match self {
-            Self::WinSdk { arch, sdk, .. } | Self::Phnt { arch, sdk, .. } => (*arch, sdk),
+        let (arch, sdk, mode) = match self {
+            Self::WinSdk { arch, sdk, mode }
+            | Self::Phnt {
+                arch, sdk, mode, ..
+            } => (*arch, sdk, *mode),
         };
 
         let mut args = vec!["-target".into(), arch.target_triple().into()];
@@ -147,6 +153,36 @@ impl HeaderConfig {
         for subdir in ["shared", "um", "ucrt", "km"] {
             args.push("-I".into());
             args.push(sdk.get_include_dir().join(subdir).to_string_lossy().into());
+        }
+
+        // Add WDF include path + version defines for whichever flavor
+        // matches the mode. KMDF/UMDF have separate version namespaces.
+        let (flavor, prefix) = match mode {
+            crate::SdkMode::Kernel => ("kmdf", "KMDF"),
+            crate::SdkMode::User => ("umdf", "UMDF"),
+        };
+        if let Some(wdf) = sdk.wdf_latest(flavor) {
+            args.push("-I".into());
+            args.push(wdf.include_dir.to_string_lossy().into());
+            args.push(format!("-D{prefix}_VERSION_MAJOR={}", wdf.major));
+            args.push(format!("-D{prefix}_VERSION_MINOR={}", wdf.minor));
+        }
+
+        // NetAdapterCx (kernel only). Adds two include paths: the per-version
+        // public headers and the `shared/netcx/shared/<ver>/` tree that owns
+        // the `net/*.h` types. `netfuncenum.h` also requires NET_VERSION_*
+        // be defined before include.
+        if mode == crate::SdkMode::Kernel
+            && let Some(netcx) = sdk.netcx_latest()
+        {
+            args.push("-I".into());
+            args.push(netcx.include_dir.to_string_lossy().into());
+            args.push(format!("-DNET_VERSION_MAJOR={}", netcx.major));
+            args.push(format!("-DNET_VERSION_MINOR={}", netcx.minor));
+            if let Some(shared) = sdk.netcx_shared_dir() {
+                args.push("-I".into());
+                args.push(shared.to_string_lossy().into());
+            }
         }
 
         // Add architecture-specific defines

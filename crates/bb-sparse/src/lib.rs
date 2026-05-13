@@ -437,3 +437,21 @@ pub fn entry_count_sdk() -> usize {
 pub fn entry_count_driver() -> usize {
     driver_lookup().len()
 }
+
+/// Iterate over every embedded SDK entry as `(name, metadata)`.
+///
+/// Order is HashMap-arbitrary. Useful for harvesting the full set of
+/// headers / libs that documented user-mode APIs live in, or for
+/// computing coverage against a parsed translation unit.
+pub fn iter_sdk() -> impl Iterator<Item = (&'static str, &'static SdkMetadata)> {
+    sdk_lookup().iter().map(|(k, v)| (k.as_str(), v))
+}
+
+/// Iterate over every embedded driver entry as `(name, metadata)`.
+///
+/// Order is HashMap-arbitrary. Useful for harvesting the full set of
+/// `include-header` values that documented kernel-mode / KMDF / UMDF
+/// DDIs live in.
+pub fn iter_driver() -> impl Iterator<Item = (&'static str, &'static DriverMetadata)> {
+    driver_lookup().iter().map(|(k, v)| (k.as_str(), v))
+}
