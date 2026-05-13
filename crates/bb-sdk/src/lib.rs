@@ -6,6 +6,7 @@
 //! defines via [`ArchDefines`].
 
 mod arch;
+mod cache;
 mod config;
 mod parser;
 mod phnt;

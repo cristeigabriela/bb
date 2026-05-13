@@ -141,6 +141,27 @@ You can update them individually or all at once (`.\update-submodules.ps1`). Bot
 | `BB_PHNT_HEADER` | Use a custom `phnt.h` instead of generating from the submodule |
 | `BB_SPARSE_SDK_JSON` | Use a pre-generated `sdk-api.json` instead of running sparse in SDK mode (alias: `BB_SPARSE_JSON`) |
 | `BB_SPARSE_DRIVER_JSON` | Use a pre-generated `driver-docs.json` instead of running sparse in driver mode |
+| `BB_NO_CACHE` | Bypass the on-disk AST cache (parse from headers every time) |
+
+### AST cache
+
+After the first `bb-funcs` / `bb-types` / `bb-consts` invocation, the parsed
+translation unit is saved (via `clang_saveTranslationUnit`) under
+`%LOCALAPPDATA%\bb\ast\<sha256>.ast`. Subsequent runs with the same SDK
++ arch + mode load the AST directly and skip libclang's full re-parse.
+Typical numbers on this SDK / WDK combo:
+
+| invocation                           | cold  | warm  |
+|--------------------------------------|-------|-------|
+| `--mode user --name CreateFileW`     | 10.3s | 5.5s  |
+| `--mode user --name __nonexistent`   | 4.8s  | 3.8s  |
+| `--mode kernel --name __nonexistent` | 2.4s  | 1.3s  |
+
+The cache key hashes the synthetic header content, every clang
+argument, and the bb-sdk crate version — any change to header config,
+SDK install path, target arch, or a bb-sdk release invalidates
+automatically. Saved ASTs are ~80 MB; delete the `bb/ast/` directory
+to nuke them, or set `BB_NO_CACHE=1` to bypass per-invocation.
 
 ### First commands
 
