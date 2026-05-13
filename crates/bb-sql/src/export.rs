@@ -228,7 +228,7 @@ mod tests {
         let col_names: HashSet<String> = stmt
             .query_map([], |r| r.get::<_, String>(1))
             .unwrap()
-            .filter_map(|r| r.ok())
+            .filter_map(std::result::Result::ok)
             .collect();
 
         assert!(col_names.contains("name"));

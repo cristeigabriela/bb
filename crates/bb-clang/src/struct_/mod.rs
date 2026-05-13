@@ -81,10 +81,10 @@ impl<'a> Struct<'a> {
             if is_anonymous {
                 continue;
             }
-            if let Some(name) = decl.get_name() {
-                if seen.insert(name.clone()) {
-                    names.push(name);
-                }
+            if let Some(name) = decl.get_name()
+                && seen.insert(name.clone())
+            {
+                names.push(name);
             }
         }
         names

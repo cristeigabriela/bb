@@ -45,7 +45,7 @@ impl<'a> Param<'a> {
         self.name.as_deref()
     }
     #[must_use]
-    pub fn get_type(&self) -> &Type<'a> {
+    pub const fn get_type(&self) -> &Type<'a> {
         self.type_info.get_type()
     }
     #[must_use]

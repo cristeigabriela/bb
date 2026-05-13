@@ -118,7 +118,7 @@ On a Windows host, you will need the following:
 - Visual Studio 2019/2022 **Build Tools**
 - LLVM + Clang (**libclang.dll**) version **>=18.1**
 - Rust **2024 edition**
-- Python **>=3.9** (for submodule setup)
+- [**uv**](https://docs.astral.sh/uv/) (Python package + project manager — `winget install --id=astral-sh.uv -e`). Plain Python **>=3.10** also works as a fallback.
 
 Afterwards, you may produce the binaries by invoking the following command:
 
@@ -132,14 +132,15 @@ The project uses two submodules, managed by `update-submodules.ps1`:
 | Submodule | Purpose | Required for | Setup |
 | --- | --- | --- | --- |
 | **phnt** | PHNT NT header generation ([phnt-single-header](https://github.com/mrexodia/phnt-single-header)) | `--phnt` flag | `.\update-submodules.ps1 phnt` |
-| **sparse** | MSDN API metadata ([sparse](https://github.com/cristeigabriela/sparse)) | Enriched function views | `.\update-submodules.ps1 sparse` |
+| **sparse** | MSDN API metadata ([sparse](https://github.com/cristeigabriela/sparse)) — embeds **both** the SDK and driver datasets | Enriched function views | `.\update-submodules.ps1 sparse` |
 
 You can update them individually or all at once (`.\update-submodules.ps1`). Both support env var overrides for custom data:
 
 | Env var | What it does |
 | --- | --- |
 | `BB_PHNT_HEADER` | Use a custom `phnt.h` instead of generating from the submodule |
-| `BB_SPARSE_JSON` | Use a pre-generated `sparse.json` instead of running the Python tool |
+| `BB_SPARSE_SDK_JSON` | Use a pre-generated `sdk-api.json` instead of running sparse in SDK mode (alias: `BB_SPARSE_JSON`) |
+| `BB_SPARSE_DRIVER_JSON` | Use a pre-generated `driver-docs.json` instead of running sparse in driver mode |
 
 ### First commands
 
@@ -196,6 +197,13 @@ bb-funcs --name "Create*" --filter fileapi.h --exported
 ```bash
 bb-funcs --where "params > 3 AND return_type = 'BOOL'"
 bb-funcs --where "name LIKE '%File%' AND is_exported = true"
+```
+
+**Filter kernel/driver functions by IRQL constraint:**
+
+```bash
+bb-funcs --mode kernel --name "Wdf*" --irql "<= DISPATCH_LEVEL"
+bb-funcs --mode kernel --irql PASSIVE_LEVEL
 ```
 
 **Export as JSON or SQLite for your own tooling:**
@@ -354,6 +362,6 @@ We use `bb-sdk` to discover (or gather) the SDK environment, then we generate a 
 
 From the translation unit, we lift the AST entities into `bb-clang` serializable objects, and we use the information that we expose there to develop the tools.
 
-For functions, `bb-clang` computes the full ABI layout: which register or stack slot each parameter occupies, per architecture and calling convention (cdecl, stdcall, fastcall). `bb-funcs` enriches this with MSDN metadata (DLL, lib, min Windows version) from [sparse](https://github.com/cristeigabriela/sparse) and cross-references known constant values for each parameter. SQL `WHERE` clause filtering is supported via `bb-sql`.
+For functions, `bb-clang` computes the full ABI layout: which register or stack slot each parameter occupies, per architecture and calling convention (cdecl, stdcall, fastcall). `bb-funcs` enriches this with MSDN metadata (DLL, lib, min Windows version, and — for kernel/WDF DDIs — IRQL constraints, KMDF/UMDF versions, etc.) from [sparse](https://github.com/cristeigabriela/sparse) and cross-references known constant values for each parameter. SQL `WHERE` clause filtering is supported via `bb-sql`.
 
 For macros specifically, `bb-consts` does a two-pass resolution: first pass evaluates simple literals and variables, second pass substitutes known constant names into unresolved macro token streams before re-evaluating. This handles things like `#define PROCESS_ALL_ACCESS (STANDARD_RIGHTS_REQUIRED | SYNCHRONIZE | 0xFFFF)`.

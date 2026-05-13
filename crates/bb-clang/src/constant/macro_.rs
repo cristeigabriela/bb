@@ -96,9 +96,13 @@ impl<'a> Constant<'a> {
             ConstantError::NotEvaluable
         })?;
         let tokens = range.tokenize();
+        let first = tokens.first().ok_or_else(|| {
+            resolving.remove(&name);
+            ConstantError::NotEvaluable
+        })?;
 
         // First token is the macro name itself.
-        let mut cexpr_tokens = vec![clang_to_cexpr_token(&tokens[0])];
+        let mut cexpr_tokens = vec![clang_to_cexpr_token(first)];
         let mut body_tokens: Vec<MacroBodyToken> = Vec::new();
         let mut component_constants: Vec<Constant<'a>> = Vec::new();
         let mut local_lookup: HashMap<String, ConstValue> = HashMap::new();
@@ -122,22 +126,23 @@ impl<'a> Constant<'a> {
 
             if is_identifier {
                 // Resolve this identifier as a constant component if not yet done.
-                if !local_lookup.contains_key(&spelling) && !resolving.contains(&spelling) {
-                    if let Some(&comp_entity) = tu_map.get(&spelling) {
-                        let resolved = match comp_entity.get_kind() {
-                            EntityKind::MacroDefinition => {
-                                // Recurse: reuse the same tu_map.
-                                Self::try_from_macro_impl(comp_entity, resolving, tu_map)
-                                    .or_else(|_| Constant::try_from(comp_entity))
-                                    .ok()
-                            }
-                            _ => Constant::try_from(comp_entity).ok(),
-                        };
-
-                        if let Some(c) = resolved {
-                            local_lookup.insert(spelling.clone(), *c.get_value());
-                            component_constants.push(c);
+                if !local_lookup.contains_key(&spelling)
+                    && !resolving.contains(&spelling)
+                    && let Some(&comp_entity) = tu_map.get(&spelling)
+                {
+                    let resolved = match comp_entity.get_kind() {
+                        EntityKind::MacroDefinition => {
+                            // Recurse: reuse the same tu_map.
+                            Self::try_from_macro_impl(comp_entity, resolving, tu_map)
+                                .or_else(|_| Constant::try_from(comp_entity))
+                                .ok()
                         }
+                        _ => Constant::try_from(comp_entity).ok(),
+                    };
+
+                    if let Some(c) = resolved {
+                        local_lookup.insert(spelling.clone(), *c.get_value());
+                        component_constants.push(c);
                     }
                 }
 
@@ -213,10 +218,10 @@ pub fn build_tu_entity_map<'tu>(tu: &'tu TranslationUnit<'tu>) -> TuEntityMap<'t
             }
             EntityKind::EnumDecl => {
                 for child in e.get_children() {
-                    if child.get_kind() == EntityKind::EnumConstantDecl {
-                        if let Some(name) = child.get_name() {
-                            map.insert(name, child);
-                        }
+                    if child.get_kind() == EntityKind::EnumConstantDecl
+                        && let Some(name) = child.get_name()
+                    {
+                        map.insert(name, child);
                     }
                 }
             }

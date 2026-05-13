@@ -6,11 +6,13 @@ use bb_clang::display::render_function_list;
 use bb_cli::{current_command_string, get_header_config, print_suggestions};
 use bb_funcs_lib::enriched::{
     ConstantLookup, build_constant_lookup_from_tu, function_to_enriched_json,
-    functions_to_enriched_json, render_enriched_detail,
+    functions_to_enriched_json, numeric_const_lookup, render_enriched_detail,
 };
 use bb_funcs_lib::{
-    FuncFilter, FuncSort, ParamCountFilter, SortDir, collect_funcs_filtered, iter_funcs,
+    FuncFilter, FuncSort, ParamCountFilter, SortDir, apply_irql_filter, collect_funcs_filtered,
+    iter_funcs,
 };
+use bb_sparse::IrqlConstraint;
 use bb_sql::export_json_to_sqlite;
 use clang::{Clang, Index};
 use clap::Parser;
@@ -123,6 +125,31 @@ struct Args {
 
     #[arg(long = "sqlite", help = "Export results to a SQLite database file")]
     sqlite: Option<PathBuf>,
+
+    #[arg(
+        long = "irql",
+        value_parser = parse_irql_arg,
+        long_help = "Filter functions by their documented IRQL constraint.\n\n\
+            Grammar: [<|<=|=|==|>=|>] LEVEL\n\
+            Levels:  PASSIVE_LEVEL, APC_LEVEL, DISPATCH_LEVEL, DPC_LEVEL,\n         \
+                     HIGH_LEVEL, IPI_LEVEL, DEVICE_LEVEL, DIRQL, ANY.\n\n\
+            Numeric comparisons (<, <=, >, >=) resolve symbolic levels via the\n\
+            macro-preprocessed kernel-mode TU (PASSIVE_LEVEL=0, DISPATCH_LEVEL=2,\n\
+            HIGH_LEVEL=31, ...). DEVICE_LEVEL and DIRQL don't have a single\n\
+            numeric value and are filtered out by numeric ops.\n\n\
+            Examples:\n  \
+            --irql PASSIVE_LEVEL           # exact match\n  \
+            --irql \"<= DISPATCH_LEVEL\"     # callable at or below dispatch\n  \
+            --irql ANY                     # disable filtering",
+        help = "Filter by IRQL (see --help for grammar). Implies --mode kernel."
+    )]
+    irql: Option<IrqlConstraint>,
+}
+
+/// `clap` value parser for `--irql`. Wraps `bb_sparse::irql::parse_constraint`
+/// in a closure that adapts the error type to `String` for clap's display.
+fn parse_irql_arg(s: &str) -> Result<IrqlConstraint, String> {
+    bb_sparse::irql::parse_constraint(s).map_err(|e| e.to_string())
 }
 
 fn main() -> Result<()> {
@@ -135,8 +162,11 @@ fn main() -> Result<()> {
     let clang_instance = Clang::new().expect("failed to initialize clang");
     let index = Index::new(&clang_instance, false, args.shared.diagnostics);
 
-    // Parse headers (without macro preprocessing for function collection).
-    let tu = config.parse(&index, false)?;
+    // Parse headers once, with macro preprocessing on. This single TU is
+    // used both for function collection and for building the sparse
+    // constant lookup (which needs MacroDefinition entities to resolve
+    // named values).
+    let tu = config.parse(&index, true)?;
 
     let func_filter = FuncFilter {
         name_pattern: args.name.clone(),
@@ -150,7 +180,7 @@ fn main() -> Result<()> {
         sort: args.sort,
         sort_dir: args.sort_dir,
         where_clause: args.where_clause.clone(),
-        first: args.first,
+        irql_filter: args.irql.clone(),
     };
     let funcs = collect_funcs_filtered(&tu, &func_filter).map_err(|e| anyhow::anyhow!(e))?;
 
@@ -164,26 +194,46 @@ fn main() -> Result<()> {
         );
     }
 
-    // Build constant lookup if sparse data is available.
-    let const_lookup = if bb_sparse::is_available() {
-        let tu_macro = config.parse(&index, true)?;
-        Some(build_constant_lookup_from_tu(&tu_macro))
+    // Build constant lookup if sparse data is available, OR if the user
+    // asked for `--irql` (it needs the same const lookup to resolve
+    // PASSIVE_LEVEL/DISPATCH_LEVEL/etc. to numeric values).
+    let const_lookup = if bb_sparse::is_available() || args.irql.is_some() {
+        Some(build_constant_lookup_from_tu(&tu))
     } else {
         None
     };
 
+    // Apply IRQL filter (post-collection, since it needs the const lookup).
+    let mut funcs = if let Some(ref filter) = args.irql {
+        let numeric = const_lookup
+            .as_ref()
+            .map(numeric_const_lookup)
+            .unwrap_or_default();
+        apply_irql_filter(funcs, filter, &numeric)
+    } else {
+        funcs
+    };
+
+    // Apply `--first` last so it composes correctly with the IRQL filter
+    // (and any other post-collection filter we add in the future).
+    if let Some(n) = args.first {
+        funcs.truncate(n);
+    }
+
     let detail = args.detail || funcs.len() == 1;
+
+    let mode = args.shared.mode;
 
     if let Some(ref path) = args.sqlite {
         let json_rows: Vec<Value> = funcs
             .iter()
-            .map(|f| function_to_enriched_json(f, const_lookup.as_ref()))
+            .map(|f| function_to_enriched_json(f, mode, const_lookup.as_ref()))
             .collect();
         export_json_to_sqlite(path, "functions", &json_rows)?;
     } else if args.json {
-        print_json(funcs.as_slice(), const_lookup.as_ref())?;
+        print_json(funcs.as_slice(), mode, const_lookup.as_ref())?;
     } else {
-        print_display(funcs.as_slice(), detail, const_lookup.as_ref());
+        print_display(funcs.as_slice(), detail, mode, const_lookup.as_ref());
     }
 
     Ok(())
@@ -191,10 +241,15 @@ fn main() -> Result<()> {
 
 /* ──────────────────────────────── Printing ──────────────────────────────── */
 
-fn print_display(funcs: &[Function], detail: bool, const_lookup: Option<&ConstantLookup>) {
+fn print_display(
+    funcs: &[Function],
+    detail: bool,
+    mode: bb_sdk::SdkMode,
+    const_lookup: Option<&ConstantLookup>,
+) {
     if detail {
         for (i, f) in funcs.iter().enumerate() {
-            print!("{}", render_enriched_detail(f, const_lookup));
+            print!("{}", render_enriched_detail(f, mode, const_lookup));
             if i < funcs.len() - 1 {
                 println!();
             }
@@ -204,10 +259,14 @@ fn print_display(funcs: &[Function], detail: bool, const_lookup: Option<&Constan
     }
 }
 
-fn print_json(funcs: &[Function], const_lookup: Option<&ConstantLookup>) -> Result<()> {
+fn print_json(
+    funcs: &[Function],
+    mode: bb_sdk::SdkMode,
+    const_lookup: Option<&ConstantLookup>,
+) -> Result<()> {
     let command = current_command_string();
     let mut output = serde_json::json!({
-        "functions": functions_to_enriched_json(funcs, const_lookup),
+        "functions": functions_to_enriched_json(funcs, mode, const_lookup),
     });
     output
         .as_object_mut()

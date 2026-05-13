@@ -213,12 +213,11 @@ fn find_workspace_root() -> Option<PathBuf> {
     let mut dir = manifest.as_path();
     loop {
         let candidate = dir.join("Cargo.toml");
-        if candidate.exists() {
-            if let Ok(content) = fs::read_to_string(&candidate) {
-                if content.contains("[workspace]") {
-                    return Some(dir.to_path_buf());
-                }
-            }
+        if candidate.exists()
+            && let Ok(content) = fs::read_to_string(&candidate)
+            && content.contains("[workspace]")
+        {
+            return Some(dir.to_path_buf());
         }
         dir = dir.parent()?;
     }

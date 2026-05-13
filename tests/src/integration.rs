@@ -1128,7 +1128,7 @@ mod tests {
             sort: None,
             sort_dir: bb_funcs_lib::SortDir::Asc,
             where_clause: None,
-            first: None,
+            irql_filter: None,
         }
     }
 

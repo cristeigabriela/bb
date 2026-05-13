@@ -38,23 +38,19 @@ pub fn run<D: TuiData>(app: &mut App<D>) -> Result<()> {
                     app.rebuild();
                     app.focus = Focus::Content;
                 }
-                KeyCode::Backspace => {
-                    if app.cursor > 0 {
-                        // Find the previous char boundary.
-                        let prev = app.search[..app.cursor]
-                            .char_indices()
-                            .next_back()
-                            .map_or(0, |(i, _)| i);
-                        app.search.remove(prev);
-                        app.cursor = prev;
-                        app.rebuild();
-                    }
+                KeyCode::Backspace if app.cursor > 0 => {
+                    // Find the previous char boundary.
+                    let prev = app.search[..app.cursor]
+                        .char_indices()
+                        .next_back()
+                        .map_or(0, |(i, _)| i);
+                    app.search.remove(prev);
+                    app.cursor = prev;
+                    app.rebuild();
                 }
-                KeyCode::Delete => {
-                    if app.cursor < app.search.len() {
-                        app.search.remove(app.cursor);
-                        app.rebuild();
-                    }
+                KeyCode::Delete if app.cursor < app.search.len() => {
+                    app.search.remove(app.cursor);
+                    app.rebuild();
                 }
                 KeyCode::Left if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     app.cursor = word_boundary_left(&app.search, app.cursor);
@@ -62,21 +58,17 @@ pub fn run<D: TuiData>(app: &mut App<D>) -> Result<()> {
                 KeyCode::Right if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     app.cursor = word_boundary_right(&app.search, app.cursor);
                 }
-                KeyCode::Left => {
-                    if app.cursor > 0 {
-                        app.cursor = app.search[..app.cursor]
-                            .char_indices()
-                            .next_back()
-                            .map_or(0, |(i, _)| i);
-                    }
+                KeyCode::Left if app.cursor > 0 => {
+                    app.cursor = app.search[..app.cursor]
+                        .char_indices()
+                        .next_back()
+                        .map_or(0, |(i, _)| i);
                 }
-                KeyCode::Right => {
-                    if app.cursor < app.search.len() {
-                        app.cursor += app.search[app.cursor..]
-                            .chars()
-                            .next()
-                            .map_or(0, char::len_utf8);
-                    }
+                KeyCode::Right if app.cursor < app.search.len() => {
+                    app.cursor += app.search[app.cursor..]
+                        .chars()
+                        .next()
+                        .map_or(0, char::len_utf8);
                 }
                 KeyCode::Home => {
                     app.cursor = 0;

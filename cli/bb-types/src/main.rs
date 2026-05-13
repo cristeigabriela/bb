@@ -91,7 +91,7 @@ fn main() -> Result<()> {
     }
 
     if let Some(ref path) = args.sqlite {
-        let json_rows: Vec<Value> = structs.iter().map(|s| s.to_json()).collect();
+        let json_rows: Vec<Value> = structs.iter().map(bb_clang::ToJson::to_json).collect();
         export_json_to_sqlite(path, "types", &json_rows)?;
     } else if args.json {
         print_json(structs.as_slice())?;

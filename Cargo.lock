@@ -111,7 +111,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "bb-arch"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "clap",
  "serde",
@@ -121,7 +121,7 @@ dependencies = [
 
 [[package]]
 name = "bb-clang"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "bb-arch",
  "bb-shared",
@@ -135,7 +135,7 @@ dependencies = [
 
 [[package]]
 name = "bb-cli"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "bb-sdk",
@@ -147,7 +147,7 @@ dependencies = [
 
 [[package]]
 name = "bb-consts"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "bb-clang",
@@ -165,7 +165,7 @@ dependencies = [
 
 [[package]]
 name = "bb-consts-tui"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "bb-clang",
@@ -180,7 +180,7 @@ dependencies = [
 
 [[package]]
 name = "bb-funcs"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "bb-arch",
@@ -202,7 +202,7 @@ dependencies = [
 
 [[package]]
 name = "bb-sdk"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "bb-arch",
@@ -214,11 +214,11 @@ dependencies = [
 
 [[package]]
 name = "bb-shared"
-version = "0.2.1"
+version = "0.3.0"
 
 [[package]]
 name = "bb-sparse"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "flate2",
  "serde",
@@ -227,7 +227,7 @@ dependencies = [
 
 [[package]]
 name = "bb-sql"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "rusqlite",
@@ -237,7 +237,7 @@ dependencies = [
 
 [[package]]
 name = "bb-tests"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "bb-arch",
@@ -245,6 +245,7 @@ dependencies = [
  "bb-consts",
  "bb-funcs",
  "bb-sdk",
+ "bb-sparse",
  "bb-types",
  "clang",
  "serde_json",
@@ -253,7 +254,7 @@ dependencies = [
 
 [[package]]
 name = "bb-tui"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "ratatui",
@@ -261,7 +262,7 @@ dependencies = [
 
 [[package]]
 name = "bb-types"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "bb-clang",
@@ -278,7 +279,7 @@ dependencies = [
 
 [[package]]
 name = "bb-types-tui"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "bb-clang",
