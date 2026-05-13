@@ -46,10 +46,10 @@ impl<'a> TypeInfo<'a> {
     /// Used by [`Field`](crate::Field) and [`Param`](crate::Param) to avoid
     /// redundant output when the underlying type is the same as the display type.
     pub fn suppress_underlying_if_matches(&mut self, display_name: Option<&str>) {
-        if let Some(ref u) = self.underlying_type {
-            if display_name.is_some_and(|d| d == u) {
-                self.underlying_type = None;
-            }
+        if let Some(ref u) = self.underlying_type
+            && display_name.is_some_and(|d| d == u)
+        {
+            self.underlying_type = None;
         }
     }
 

@@ -177,7 +177,7 @@ fn print_json(enums: &[Enum], vars: &[Constant], filter: &ConstFilter) -> Result
 
 fn export_consts_sqlite(enums: &[Enum], vars: &[Constant], path: &std::path::Path) -> Result<()> {
     // Export standalone constants to their own table.
-    let const_rows: Vec<Value> = vars.iter().map(|c| c.to_json()).collect();
+    let const_rows: Vec<Value> = vars.iter().map(bb_clang::ToJson::to_json).collect();
     if !const_rows.is_empty() {
         export_json_to_sqlite(path, "constants", &const_rows)?;
     }
@@ -198,7 +198,7 @@ fn export_consts_sqlite(enums: &[Enum], vars: &[Constant], path: &std::path::Pat
     }
 
     // Export enums themselves as a third table.
-    let enum_rows: Vec<Value> = enums.iter().map(|e| e.to_json()).collect();
+    let enum_rows: Vec<Value> = enums.iter().map(bb_clang::ToJson::to_json).collect();
     if !enum_rows.is_empty() {
         export_json_to_sqlite(path, "enums", &enum_rows)?;
     }

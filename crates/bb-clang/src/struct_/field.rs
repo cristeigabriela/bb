@@ -50,7 +50,7 @@ impl<'a> Field<'a> {
         &self.name
     }
     #[must_use]
-    pub fn get_type(&self) -> &Type<'a> {
+    pub const fn get_type(&self) -> &Type<'a> {
         self.type_info.get_type()
     }
     #[must_use]
@@ -169,10 +169,10 @@ pub fn collect_fields<'a>(entity: &Entity<'a>) -> Vec<Field<'a>> {
 
     let mut fields = Vec::new();
     entity.visit_children(|child, _| {
-        if child.get_kind() == EntityKind::FieldDecl {
-            if let Ok(field) = Field::try_from((child, entity)) {
-                fields.push(field);
-            }
+        if child.get_kind() == EntityKind::FieldDecl
+            && let Ok(field) = Field::try_from((child, entity))
+        {
+            fields.push(field);
         }
         EntityVisitResult::Continue
     });

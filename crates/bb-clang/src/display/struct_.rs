@@ -99,23 +99,23 @@ fn write_fields(
                 .get_declaration()
                 .and_then(|d| d.get_name());
 
-            if let Some(ref key) = type_key {
-                if seen.insert(key.clone()) {
-                    let child_fields = field.get_child_fields();
-                    if !child_fields.is_empty() {
-                        let new_prefix = format!("{prefix}{child_prefix}");
-                        write_fields(
-                            out,
-                            &child_fields,
-                            max_depth,
-                            current_depth + 1,
-                            &new_prefix,
-                            None,
-                            seen,
-                        );
-                    }
-                    seen.remove(key);
+            if let Some(ref key) = type_key
+                && seen.insert(key.clone())
+            {
+                let child_fields = field.get_child_fields();
+                if !child_fields.is_empty() {
+                    let new_prefix = format!("{prefix}{child_prefix}");
+                    write_fields(
+                        out,
+                        &child_fields,
+                        max_depth,
+                        current_depth + 1,
+                        &new_prefix,
+                        None,
+                        seen,
+                    );
                 }
+                seen.remove(key);
             }
         }
     }

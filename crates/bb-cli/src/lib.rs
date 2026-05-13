@@ -32,7 +32,7 @@
 
 use bb_sdk::{Arch, HeaderConfig, PhntVersion, SdkMode};
 use bb_shared::suggest_closest;
-use clap::{Args, arg};
+use clap::Args;
 use colored::Colorize;
 
 /* ─────────────────────────────────── CLI ────────────────────────────────── */

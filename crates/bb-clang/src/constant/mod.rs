@@ -64,7 +64,7 @@ pub struct Constant<'a> {
     /// Skipped during serialization; used by [`ToJson::to_json_full`] to emit
     /// `referred_components` at the root JSON level.
     #[serde(skip)]
-    component_constants: Vec<Constant<'a>>,
+    component_constants: Vec<Self>,
 }
 
 impl<'a> Constant<'a> {
@@ -253,7 +253,7 @@ fn extract_body_tokens(tokens: &[Token]) -> Vec<MacroBodyToken> {
 /// Spaces are inserted only between two "word" tokens (identifiers or
 /// number literals). Punctuation and brackets bind tightly:
 /// `(DWORD)(FOO | BAR)` not `( DWORD ) ( FOO | BAR )`.
-pub(crate) fn expression_from_body_tokens(tokens: &[MacroBodyToken]) -> Option<String> {
+pub fn expression_from_body_tokens(tokens: &[MacroBodyToken]) -> Option<String> {
     if tokens.is_empty() {
         return None;
     }

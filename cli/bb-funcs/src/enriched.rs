@@ -13,24 +13,42 @@ use bb_clang::display::{format_abi_param, format_return_location, format_tags};
 use bb_clang::{Constant, Function, Param, SourceLocation, ToJson};
 use bb_cli::terminal_width;
 use bb_consts_lib::{ConstFilter, collect_constants, collect_enums};
-use bb_sparse::{FuncMetadata, ParamMetadata};
+use bb_sdk::SdkMode;
+use bb_sparse::{DriverMetadata, Entry, ParamMetadata};
 use colored::Colorize;
 use comfy_table::{Attribute, Cell, CellAlignment, ContentArrangement, Table, presets};
 use serde_json::{Value, json};
 
 /* ────────────────────────────────── Types ───────────────────────────────── */
 
-/// A [`Function`] enriched with optional sparse metadata.
+/// A [`Function`] enriched with an optional sparse-metadata entry.
 pub struct EnrichedFunction<'a> {
     pub function: &'a Function<'a>,
-    pub metadata: Option<&'static FuncMetadata>,
+    pub entry: Option<Entry<'static>>,
 }
 
 impl<'a> EnrichedFunction<'a> {
+    /// Resolve sparse metadata for `function`, preferring the dataset that
+    /// matches the active `SdkMode`. Kernel mode tries `lookup_driver` first
+    /// then falls back to `lookup_sdk`; user mode is reversed.
     #[must_use]
-    pub fn new_ref(function: &'a Function<'a>) -> Self {
-        let metadata = bb_sparse::lookup(function.get_name());
-        Self { function, metadata }
+    pub fn new_ref(function: &'a Function<'a>, mode: SdkMode) -> Self {
+        let name = function.get_name();
+        let entry = lookup_for_mode(name, mode);
+        Self { function, entry }
+    }
+}
+
+/// Mode-aware sparse lookup: prefer the dataset that matches the SDK mode,
+/// fall back to the other if the function isn't in the preferred one.
+fn lookup_for_mode(name: &str, mode: SdkMode) -> Option<Entry<'static>> {
+    match mode {
+        SdkMode::Kernel => bb_sparse::lookup_driver(name)
+            .map(Entry::Driver)
+            .or_else(|| bb_sparse::lookup_sdk(name).map(Entry::Sdk)),
+        SdkMode::User => bb_sparse::lookup_sdk(name)
+            .map(Entry::Sdk)
+            .or_else(|| bb_sparse::lookup_driver(name).map(Entry::Driver)),
     }
 }
 
@@ -95,21 +113,35 @@ pub fn build_constant_lookup_from_tu(tu: &clang::TranslationUnit) -> ConstantLoo
     lookup
 }
 
+/// Project a [`ConstantLookup`] down to a plain `name -> u64` map for
+/// IRQL resolution. The location info isn't needed there.
+#[must_use]
+pub fn numeric_const_lookup(lookup: &ConstantLookup) -> HashMap<String, u64> {
+    lookup.iter().map(|(k, v)| (k.clone(), v.value)).collect()
+}
+
 /* ─────────────────────── Full enriched detail view ─────────────────────── */
 
 /// Render the full enriched detail view for a function.
 #[must_use]
-pub fn render_enriched_detail(f: &Function, const_lookup: Option<&ConstantLookup>) -> String {
-    let ef = EnrichedFunction::new_ref(f);
-    let meta = ef.metadata;
+pub fn render_enriched_detail(
+    f: &Function,
+    mode: SdkMode,
+    const_lookup: Option<&ConstantLookup>,
+) -> String {
+    let ef = EnrichedFunction::new_ref(f, mode);
+    let entry = ef.entry;
     let mut out = String::new();
 
-    render_prototype(&mut out, f, meta);
-    render_header_tags(&mut out, f, meta);
+    render_prototype(&mut out, f, entry);
+    render_header_tags(&mut out, f, entry);
     render_abi_section(&mut out, f);
-    if let Some(meta) = meta {
-        render_arguments_section(&mut out, f, meta, const_lookup);
-        render_info_section(&mut out, meta);
+    if let Some(entry) = entry {
+        render_arguments_section(&mut out, f, entry, const_lookup);
+        render_info_section(&mut out, entry);
+        if let Some(drv) = entry.driver() {
+            render_driver_section(&mut out, drv);
+        }
     }
 
     out
@@ -118,9 +150,10 @@ pub fn render_enriched_detail(f: &Function, const_lookup: Option<&ConstantLookup
 /* ───────────────────────── Section renderers ────────────────────────────── */
 
 /// Tags line + variants.
-fn render_header_tags(out: &mut String, f: &Function, meta: Option<&FuncMetadata>) {
+fn render_header_tags(out: &mut String, f: &Function, entry: Option<Entry<'_>>) {
     let mut tags = format_tags(f);
-    if let Some(meta) = meta {
+    if let Some(entry) = entry {
+        let meta = entry.as_metadata();
         if let Some(dll) = meta.dll_display() {
             let lib = meta.lib_display().unwrap_or_else(|| "?".into());
             tags.push(format!("{dll} ({lib})"));
@@ -128,17 +161,17 @@ fn render_header_tags(out: &mut String, f: &Function, meta: Option<&FuncMetadata
     }
     let _ = writeln!(out, "  {}", tags.join("  ·  ").bright_black());
 
-    if let Some(meta) = meta {
-        if let Some(ref api) = meta.metadata {
-            let names = api.names();
-            if names.len() > 1 {
-                let _ = writeln!(
-                    out,
-                    "  {} {}",
-                    "variants:".dimmed(),
-                    names.join(", ").bright_black()
-                );
-            }
+    if let Some(entry) = entry
+        && let Some(api) = entry.as_metadata().api_metadata()
+    {
+        let names = api.names();
+        if names.len() > 1 {
+            let _ = writeln!(
+                out,
+                "  {} {}",
+                "variants:".dimmed(),
+                names.join(", ").bright_black()
+            );
         }
     }
 }
@@ -177,15 +210,16 @@ fn render_abi_section(out: &mut String, f: &Function) {
 fn render_arguments_section(
     out: &mut String,
     f: &Function,
-    meta: &FuncMetadata,
+    entry: Entry<'_>,
     const_lookup: Option<&ConstantLookup>,
 ) {
+    let params = entry.as_metadata().params();
     let params_with_values: Vec<_> = f
         .get_params()
         .iter()
         .filter_map(|p| {
             let name = p.get_name()?;
-            let pm = meta.params.get(name)?;
+            let pm = params.get(name)?;
             if pm.values.is_empty() {
                 return None;
             }
@@ -214,14 +248,17 @@ fn render_arguments_section(
     }
 }
 
-/// Info section: requirements + linkage.
-fn render_info_section(out: &mut String, meta: &FuncMetadata) {
+/// Info section: requirements + linkage (shared fields).
+fn render_info_section(out: &mut String, entry: Entry<'_>) {
+    let meta = entry.as_metadata();
+    let api_locations = meta
+        .api_metadata()
+        .map(bb_sparse::ApiMetadata::locations)
+        .unwrap_or_default();
+
     let has_info = meta.min_client_str().is_some()
         || meta.min_server_str().is_some()
-        || meta
-            .metadata
-            .as_ref()
-            .is_some_and(|a| a.locations().len() > 1);
+        || api_locations.len() > 1;
 
     if !has_info {
         return;
@@ -236,17 +273,51 @@ fn render_info_section(out: &mut String, meta: &FuncMetadata) {
     if let Some(s) = meta.min_server_str() {
         let _ = writeln!(out, "  {} {s}", "server:".dimmed());
     }
-    if let Some(ref api) = meta.metadata {
-        let locations = api.locations();
-        if locations.len() > 1 {
-            let _ = writeln!(out, "  {} {}", "also in:".dimmed(), locations.join(", "));
+    if api_locations.len() > 1 {
+        let _ = writeln!(
+            out,
+            "  {} {}",
+            "also in:".dimmed(),
+            api_locations.join(", ")
+        );
+    }
+}
+
+/// Driver section: IRQL + KMDF/UMDF + target-type + tech-root + include.
+/// Only invoked when `entry.driver()` is `Some`. Rows with no source data
+/// are skipped to avoid dead lines.
+fn render_driver_section(out: &mut String, drv: &DriverMetadata) {
+    let irql_line = drv.irql.as_ref().map(|c| match c.op.as_deref() {
+        Some(op) => format!("{op} {}", c.level),
+        None => c.level.clone(),
+    });
+
+    let rows: [(&str, Option<String>); 7] = [
+        ("irql:", irql_line),
+        ("kmdf:", drv.kmdf_ver_str().map(str::to_string)),
+        ("umdf:", drv.umdf_ver_str().map(str::to_string)),
+        ("target-type:", drv.target_type_str().map(str::to_string)),
+        ("tech-root:", drv.tech_root_str().map(str::to_string)),
+        ("include:", drv.include_header_str().map(str::to_string)),
+        ("kind:", drv.construct_type_str().map(str::to_string)),
+    ];
+
+    if rows.iter().all(|(_, v)| v.is_none()) {
+        return;
+    }
+
+    let _ = writeln!(out);
+    let _ = writeln!(out, "  {}", "Driver".white().bold().underline());
+    for (label, value) in rows {
+        if let Some(v) = value {
+            let _ = writeln!(out, "  {} {v}", label.dimmed());
         }
     }
 }
 
 /* ──────────────────────── C prototype rendering ────────────────────────── */
 
-fn render_prototype(out: &mut String, f: &Function, meta: Option<&FuncMetadata>) {
+fn render_prototype(out: &mut String, f: &Function, entry: Option<Entry<'_>>) {
     let ret = f.get_return_type_name().green();
     let name = f.get_name().cyan().bold();
 
@@ -271,7 +342,7 @@ fn render_prototype(out: &mut String, f: &Function, meta: Option<&FuncMetadata>)
 
     let sal_width = params
         .iter()
-        .map(|p| sal_for_param(p, meta).len())
+        .map(|p| sal_for_param(p, entry).len())
         .max()
         .unwrap_or(0);
     let type_width = params
@@ -282,7 +353,7 @@ fn render_prototype(out: &mut String, f: &Function, meta: Option<&FuncMetadata>)
 
     for (i, p) in params.iter().enumerate() {
         let is_last = i == params.len() - 1;
-        let sal = sal_for_param(p, meta);
+        let sal = sal_for_param(p, entry);
         let sal_styled = if sal.is_empty() {
             format!("{:>width$}", "", width = sal_width + 6)
         } else {
@@ -302,14 +373,14 @@ fn render_prototype(out: &mut String, f: &Function, meta: Option<&FuncMetadata>)
     let _ = writeln!(out, "  );");
 }
 
-fn sal_for_param(p: &Param, meta: Option<&FuncMetadata>) -> String {
-    let Some(meta) = meta else {
+fn sal_for_param(p: &Param, entry: Option<Entry<'_>>) -> String {
+    let Some(entry) = entry else {
         return String::new();
     };
     let Some(name) = p.get_name() else {
         return String::new();
     };
-    let Some(pm) = meta.params.get(name) else {
+    let Some(pm) = entry.as_metadata().params().get(name) else {
         return String::new();
     };
     let dirs = pm.direction_strings();
@@ -330,15 +401,15 @@ fn render_values_table(
         .values
         .iter()
         .filter_map(|(name, sparse_val)| {
-            if let Some(lookup) = const_lookup {
-                if let Some(info) = lookup.get(name.as_str()) {
-                    let loc_str = info
-                        .location
-                        .as_ref()
-                        .map(std::string::ToString::to_string)
-                        .unwrap_or_default();
-                    return Some((name.clone(), format!("{:#X}", info.value), loc_str));
-                }
+            if let Some(lookup) = const_lookup
+                && let Some(info) = lookup.get(name.as_str())
+            {
+                let loc_str = info
+                    .location
+                    .as_ref()
+                    .map(std::string::ToString::to_string)
+                    .unwrap_or_default();
+                return Some((name.clone(), format!("{:#X}", info.value), loc_str));
             }
             let val_str = match sparse_val.as_i64() {
                 Some(v) => format!("{v:#X}"),
@@ -389,21 +460,21 @@ fn param_values_to_json(pm: &ParamMetadata, const_lookup: Option<&ConstantLookup
 
     for (name, sparse_val) in &pm.values {
         // Cross-ref with bb-consts first.
-        if let Some(lookup) = const_lookup {
-            if let Some(info) = lookup.get(name.as_str()) {
-                let loc_json = info
-                    .location
-                    .as_ref()
-                    .and_then(|l| serde_json::to_value(l).ok())
-                    .unwrap_or(Value::Null);
-                obj.insert(
-                    name.clone(),
-                    json!({ "value": info.value, "source": loc_json }),
-                );
+        if let Some(lookup) = const_lookup
+            && let Some(info) = lookup.get(name.as_str())
+        {
+            let loc_json = info
+                .location
+                .as_ref()
+                .and_then(|l| serde_json::to_value(l).ok())
+                .unwrap_or(Value::Null);
+            obj.insert(
+                name.clone(),
+                json!({ "value": info.value, "source": loc_json }),
+            );
 
-                // No need to proceed.
-                continue;
-            }
+            // No need to proceed.
+            continue;
         }
 
         // If present, fall back on sparse default value.
@@ -419,11 +490,29 @@ fn param_values_to_json(pm: &ParamMetadata, const_lookup: Option<&ConstantLookup
     Value::Object(obj)
 }
 
+/// JSON shape for a driver entry's extra fields.
+fn driver_to_json(drv: &DriverMetadata) -> Value {
+    json!({
+        "irql": drv.irql,
+        "irql_raw": drv.irql_raw_str(),
+        "kmdf_ver": drv.kmdf_ver_str(),
+        "umdf_ver": drv.umdf_ver_str(),
+        "target_type": drv.target_type_str(),
+        "tech_root": drv.tech_root_str(),
+        "include_header": drv.include_header_str(),
+        "construct_type": drv.construct_type_str(),
+    })
+}
+
 /// Serialize a single function to enriched JSON.
 #[must_use]
-pub fn function_to_enriched_json(f: &Function, const_lookup: Option<&ConstantLookup>) -> Value {
-    let ef = EnrichedFunction::new_ref(f);
-    let meta = ef.metadata;
+pub fn function_to_enriched_json(
+    f: &Function,
+    mode: SdkMode,
+    const_lookup: Option<&ConstantLookup>,
+) -> Value {
+    let ef = EnrichedFunction::new_ref(f, mode);
+    let entry = ef.entry;
 
     // Start from the base serde JSON for each param, then enrich with
     // sparse metadata and reformatted ABI info.
@@ -441,7 +530,7 @@ pub fn function_to_enriched_json(f: &Function, const_lookup: Option<&ConstantLoo
             obj.insert("abi".into(), p.get_abi_location().to_json());
 
             // Add sparse metadata (directions, known constant values).
-            let pm = meta.and_then(|m| p.get_name().and_then(|n| m.params.get(n)));
+            let pm = entry.and_then(|e| p.get_name().and_then(|n| e.as_metadata().params().get(n)));
             let dirs: Vec<String> = pm
                 .map(bb_sparse::ParamMetadata::direction_strings)
                 .unwrap_or_default();
@@ -461,19 +550,28 @@ pub fn function_to_enriched_json(f: &Function, const_lookup: Option<&ConstantLoo
     obj.insert("params".into(), json!(params));
     obj.insert("return_abi".into(), f.get_return_location().to_json());
 
-    if let Some(m) = meta {
-        let api = m.metadata.as_ref();
+    if let Some(entry) = entry {
+        let meta = entry.as_metadata();
+        let api = meta.api_metadata();
         obj.insert(
             "metadata".into(),
             json!({
-                "dll": m.dll_display(),
-                "lib": m.lib_display(),
-                "min_client": m.min_client_str(),
-                "min_server": m.min_server_str(),
+                "source": match entry.source() {
+                    bb_sparse::Source::Sdk => "sdk",
+                    bb_sparse::Source::Driver => "driver",
+                },
+                "dll": meta.dll_display(),
+                "lib": meta.lib_display(),
+                "min_client": meta.min_client_str(),
+                "min_server": meta.min_server_str(),
                 "variants": api.map(bb_sparse::ApiMetadata::names).unwrap_or_default(),
                 "locations": api.map(bb_sparse::ApiMetadata::locations).unwrap_or_default(),
             }),
         );
+
+        if let Some(drv) = entry.driver() {
+            obj.insert("driver".into(), driver_to_json(drv));
+        }
     }
 
     fj
@@ -483,12 +581,13 @@ pub fn function_to_enriched_json(f: &Function, const_lookup: Option<&ConstantLoo
 #[must_use]
 pub fn functions_to_enriched_json(
     funcs: &[Function],
+    mode: SdkMode,
     const_lookup: Option<&ConstantLookup>,
 ) -> Value {
     Value::Array(
         funcs
             .iter()
-            .map(|f| function_to_enriched_json(f, const_lookup))
+            .map(|f| function_to_enriched_json(f, mode, const_lookup))
             .collect(),
     )
 }
