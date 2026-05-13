@@ -199,6 +199,13 @@ bb-funcs --where "params > 3 AND return_type = 'BOOL'"
 bb-funcs --where "name LIKE '%File%' AND is_exported = true"
 ```
 
+**Filter kernel/driver functions by IRQL constraint:**
+
+```bash
+bb-funcs --mode kernel --name "Wdf*" --irql "<= DISPATCH_LEVEL"
+bb-funcs --mode kernel --irql PASSIVE_LEVEL
+```
+
 **Export as JSON or SQLite for your own tooling:**
 
 ```bash

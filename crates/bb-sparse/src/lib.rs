@@ -7,17 +7,12 @@
 //! driver-specific fields like IRQL constraints and KMDF/UMDF version tags.
 //!
 //! Two JSON blobs are gzip-compressed at build time and decompressed lazily
-//! on first access. SDK and driver entries live in the same lookup space —
-//! [`lookup`] checks SDK first then driver (their function-name spaces are
-//! largely disjoint). Use [`lookup_sdk`] / [`lookup_driver`] for an explicit
-//! per-source query.
-//!
-//! Driver-only metadata (IRQL, KMDF/UMDF version, `target-type`, etc.) is
-//! exposed via [`FuncMetadata::driver`], which returns `Some(&DriverMetadata)`
-//! only for entries that came from the driver dataset. SDK entries always
-//! return `None` here, even if the source JSON were to contain stray fields.
-//!
-//! See `bb-sparse/sparse` for the upstream parser and JSON schema.
+//! on first access. The two datasets are exposed as two distinct types —
+//! [`SdkMetadata`] and [`DriverMetadata`] — that share a common surface
+//! through the [`Metadata`] trait. [`lookup`] returns an [`Entry`] enum that
+//! tags which source the result came from; [`lookup_sdk`] and
+//! [`lookup_driver`] hand back concrete types when you already know the
+//! source.
 
 use std::collections::HashMap;
 use std::io::Read;
@@ -26,10 +21,14 @@ use std::sync::OnceLock;
 use flate2::read::GzDecoder;
 use serde::Deserialize;
 
-/* ────────────────────────────────── Types ───────────────────────────────── */
+pub mod irql;
 
-/// Which sparse dataset a [`FuncMetadata`] entry came from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub use irql::IrqlConstraint;
+
+/* ────────────────────────────────── Source ──────────────────────────────── */
+
+/// Which sparse dataset an entry came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Source {
     /// MicrosoftDocs/sdk-api — user-mode Win32 APIs.
     Sdk,
@@ -37,53 +36,59 @@ pub enum Source {
     Driver,
 }
 
-/// Metadata for a single Windows API function, sourced from MSDN documentation.
+/* ─────────────────────────── Shared metadata ────────────────────────────── */
+
+/// Fields shared by both sdk-api and windows-driver-docs-ddi frontmatter.
 ///
-/// Fields use `serde_json::Value` where the sparse JSON schema is inconsistent
-/// (some fields are strings in one entry, arrays or null in another).
+/// Kept private — public callers reach these fields through the [`Metadata`]
+/// trait (accessor methods) or through the typed wrappers.
 #[derive(Debug, Clone, Deserialize)]
-pub struct FuncMetadata {
+struct Shared {
     /// Header file (e.g., `"fileapi.h"`).
     #[serde(default)]
-    pub header: serde_json::Value,
-    /// Link library (e.g., `"Kernel32.lib"` or `["lib1", "lib2"]`).
+    header: serde_json::Value,
+    /// Link library (string or array of strings).
     #[serde(default)]
-    pub lib: serde_json::Value,
-    /// DLL name (e.g., `"Kernel32.dll"` or `["dll1", "dll2"]`).
+    lib: serde_json::Value,
+    /// DLL name (string or array of strings).
     #[serde(default)]
-    pub dll: serde_json::Value,
+    dll: serde_json::Value,
     /// Minimum Windows client version.
     #[serde(default)]
-    pub min_client_version: serde_json::Value,
+    min_client_version: serde_json::Value,
     /// Minimum Windows server version.
     #[serde(default)]
-    pub min_server_version: serde_json::Value,
+    min_server_version: serde_json::Value,
     /// Extended API metadata.
     #[serde(default)]
-    pub metadata: Option<ApiMetadata>,
+    metadata: Option<ApiMetadata>,
     /// Per-parameter metadata, keyed by parameter name.
     #[serde(default)]
-    pub params: HashMap<String, ParamMetadata>,
-
-    /// Internal slot for driver-only fields. Always `None` for SDK entries.
-    /// Public access goes through [`FuncMetadata::driver`], which enforces
-    /// the source check.
-    #[serde(skip)]
-    driver: Option<DriverMetadata>,
-
-    /// Which dataset this entry came from. Populated at load time; never
-    /// present in the source JSON.
-    #[serde(skip)]
-    pub source: Option<Source>,
+    params: HashMap<String, ParamMetadata>,
 }
 
-/// Driver-mode-only metadata from `windows-driver-docs-ddi` frontmatter.
+/* ─────────────────────────── SdkMetadata ────────────────────────────────── */
+
+/// Metadata for a single user-mode Win32 API function, from sdk-api.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SdkMetadata {
+    #[serde(flatten)]
+    shared: Shared,
+}
+
+/* ─────────────────────────── DriverMetadata ─────────────────────────────── */
+
+/// Metadata for a single kernel / WDF DDI, from windows-driver-docs-ddi.
 ///
-/// Only present on entries returned by [`lookup_driver`] (or by [`lookup`]
-/// when the SDK dataset doesn't have a matching name).
-#[derive(Debug, Clone, Default, Deserialize)]
+/// Extends the shared MSDN frontmatter with driver-only fields: IRQL
+/// constraints, KMDF/UMDF version requirements, target-type, tech.root,
+/// and the include-header used by driver code.
+#[derive(Debug, Clone, Deserialize)]
 pub struct DriverMetadata {
-    /// `req.include-header` from the page frontmatter.
+    #[serde(flatten)]
+    shared: Shared,
+
+    /// `req.include-header` from the page frontmatter (e.g., `"wdf.h"`).
     #[serde(default)]
     pub include_header: serde_json::Value,
     /// `req.target-type` (e.g., `"Universal"`, `"Desktop"`).
@@ -108,112 +113,6 @@ pub struct DriverMetadata {
     /// couldn't parse).
     #[serde(default)]
     pub irql_raw: serde_json::Value,
-}
-
-/// API-level metadata from the MSDN documentation frontmatter.
-#[derive(Debug, Clone, Deserialize)]
-pub struct ApiMetadata {
-    /// Unique identifier (e.g., `"NF:fileapi.CreateFileW"`).
-    #[serde(default, rename = "UID")]
-    pub uid: serde_json::Value,
-    /// Documentation title.
-    #[serde(default)]
-    pub title: serde_json::Value,
-    /// Short description from the page intro.
-    #[serde(default)]
-    pub description: serde_json::Value,
-    /// API classification (e.g., `["DllExport"]`). May contain nulls.
-    #[serde(default)]
-    pub api_type: Vec<serde_json::Value>,
-    /// All DLL locations where the function exists. May contain nulls.
-    #[serde(default)]
-    pub api_location: Vec<serde_json::Value>,
-    /// Function name variants (e.g., `["CreateFile", "CreateFileA", "CreateFileW"]`).
-    #[serde(default)]
-    pub api_name: Vec<serde_json::Value>,
-}
-
-/// Normalized IRQL constraint.
-///
-/// `level` is one of: `PASSIVE_LEVEL`, `APC_LEVEL`, `DISPATCH_LEVEL`,
-/// `DPC_LEVEL`, `DEVICE_LEVEL`, `DIRQL`, `HIGH_LEVEL`, `IPI_LEVEL`,
-/// or `ANY`. `op` is one of `<`, `<=`, `=`, `==`, `>=`, `>` or `None`
-/// for an exact-or-implicit match.
-#[derive(Debug, Clone, Deserialize)]
-pub struct IrqlConstraint {
-    pub level: String,
-    #[serde(default)]
-    pub op: Option<String>,
-}
-
-/// Per-parameter metadata from MSDN documentation.
-#[derive(Debug, Clone, Deserialize)]
-pub struct ParamMetadata {
-    /// SAL-style directions (e.g., `["in"]`, `["in", "optional"]`, `["out"]`).
-    #[serde(default)]
-    pub directions: Vec<serde_json::Value>,
-    /// Known constant values for this parameter (e.g., `{"FILE_SHARE_READ": 1}`).
-    #[serde(default)]
-    pub values: HashMap<String, serde_json::Value>,
-}
-
-/* ─────────────────────── Value extraction helpers ──────────────────────── */
-
-/// Extract a display string from a `Value` that might be a string or an array of strings.
-fn value_as_display(v: &serde_json::Value) -> Option<String> {
-    match v {
-        serde_json::Value::String(s) => Some(s.clone()),
-        serde_json::Value::Array(arr) => {
-            let strs: Vec<&str> = arr.iter().filter_map(|v| v.as_str()).collect();
-            if strs.is_empty() {
-                None
-            } else {
-                Some(strs.join(", "))
-            }
-        }
-        _ => None,
-    }
-}
-
-/// Extract a `Vec<String>` from a `Vec<Value>`, skipping nulls.
-fn values_as_strings(vals: &[serde_json::Value]) -> Vec<String> {
-    vals.iter()
-        .filter_map(|v| v.as_str().map(String::from))
-        .collect()
-}
-
-impl FuncMetadata {
-    /// Get the header as a string, if available.
-    #[must_use]
-    pub fn header_str(&self) -> Option<&str> {
-        self.header.as_str()
-    }
-    /// Get the lib as a display string (may be a single value or comma-joined array).
-    #[must_use]
-    pub fn lib_display(&self) -> Option<String> {
-        value_as_display(&self.lib)
-    }
-    /// Get the DLL as a display string (may be a single value or comma-joined array).
-    #[must_use]
-    pub fn dll_display(&self) -> Option<String> {
-        value_as_display(&self.dll)
-    }
-    /// Get the minimum client version, if available.
-    #[must_use]
-    pub fn min_client_str(&self) -> Option<&str> {
-        self.min_client_version.as_str()
-    }
-    /// Get the minimum server version, if available.
-    #[must_use]
-    pub fn min_server_str(&self) -> Option<&str> {
-        self.min_server_version.as_str()
-    }
-    /// Driver-only metadata, only present for entries from the driver dataset.
-    /// Returns `None` for SDK entries.
-    #[must_use]
-    pub fn driver(&self) -> Option<&DriverMetadata> {
-        self.driver.as_ref()
-    }
 }
 
 impl DriverMetadata {
@@ -254,46 +153,198 @@ impl DriverMetadata {
     }
 }
 
+/* ────────────────────────── Shared accessor trait ───────────────────────── */
+
+/// Accessors shared by every metadata flavor.
+///
+/// Implemented by both [`SdkMetadata`] and [`DriverMetadata`] so callers that
+/// only care about fields common to both datasets (header, DLL, lib, min
+/// versions, params) can write `&dyn Metadata` once.
+pub trait Metadata {
+    fn header_str(&self) -> Option<&str>;
+    fn lib_display(&self) -> Option<String>;
+    fn dll_display(&self) -> Option<String>;
+    fn min_client_str(&self) -> Option<&str>;
+    fn min_server_str(&self) -> Option<&str>;
+    fn api_metadata(&self) -> Option<&ApiMetadata>;
+    fn params(&self) -> &HashMap<String, ParamMetadata>;
+}
+
+macro_rules! impl_metadata_via_shared {
+    ($t:ty) => {
+        impl Metadata for $t {
+            fn header_str(&self) -> Option<&str> {
+                self.shared.header.as_str()
+            }
+            fn lib_display(&self) -> Option<String> {
+                value_as_display(&self.shared.lib)
+            }
+            fn dll_display(&self) -> Option<String> {
+                value_as_display(&self.shared.dll)
+            }
+            fn min_client_str(&self) -> Option<&str> {
+                self.shared.min_client_version.as_str()
+            }
+            fn min_server_str(&self) -> Option<&str> {
+                self.shared.min_server_version.as_str()
+            }
+            fn api_metadata(&self) -> Option<&ApiMetadata> {
+                self.shared.metadata.as_ref()
+            }
+            fn params(&self) -> &HashMap<String, ParamMetadata> {
+                &self.shared.params
+            }
+        }
+    };
+}
+
+impl_metadata_via_shared!(SdkMetadata);
+impl_metadata_via_shared!(DriverMetadata);
+
+/* ─────────────────────────────── Entry ──────────────────────────────────── */
+
+/// A metadata entry returned by [`lookup`], tagged with its source.
+///
+/// Use [`Entry::as_metadata`] to access the shared fields without caring
+/// which source they came from. Use [`Entry::driver`] to reach the
+/// driver-only fields when you specifically need them.
+#[derive(Debug, Clone, Copy)]
+pub enum Entry<'a> {
+    Sdk(&'a SdkMetadata),
+    Driver(&'a DriverMetadata),
+}
+
+impl<'a> Entry<'a> {
+    /// Borrow this entry as a shared-trait reference.
+    #[must_use]
+    pub fn as_metadata(&self) -> &'a dyn Metadata {
+        match *self {
+            Self::Sdk(m) => m,
+            Self::Driver(m) => m,
+        }
+    }
+
+    /// Which dataset this entry came from.
+    #[must_use]
+    pub fn source(&self) -> Source {
+        match self {
+            Self::Sdk(_) => Source::Sdk,
+            Self::Driver(_) => Source::Driver,
+        }
+    }
+
+    /// Driver-only metadata, if and only if this is a driver entry.
+    #[must_use]
+    pub fn driver(&self) -> Option<&'a DriverMetadata> {
+        match *self {
+            Self::Driver(m) => Some(m),
+            Self::Sdk(_) => None,
+        }
+    }
+
+    /// SDK-only metadata, if and only if this is an SDK entry.
+    #[must_use]
+    pub fn sdk(&self) -> Option<&'a SdkMetadata> {
+        match *self {
+            Self::Sdk(m) => Some(m),
+            Self::Driver(_) => None,
+        }
+    }
+}
+
+/* ─────────────────────────── ApiMetadata / params ───────────────────────── */
+
+/// API-level metadata from the MSDN documentation frontmatter.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ApiMetadata {
+    /// Unique identifier (e.g., `"NF:fileapi.CreateFileW"`).
+    #[serde(default, rename = "UID")]
+    pub uid: serde_json::Value,
+    /// Documentation title.
+    #[serde(default)]
+    pub title: serde_json::Value,
+    /// Short description from the page intro.
+    #[serde(default)]
+    pub description: serde_json::Value,
+    /// API classification (e.g., `["DllExport"]`). May contain nulls.
+    #[serde(default)]
+    pub api_type: Vec<serde_json::Value>,
+    /// All DLL locations where the function exists. May contain nulls.
+    #[serde(default)]
+    pub api_location: Vec<serde_json::Value>,
+    /// Function name variants (e.g., `["CreateFile", "CreateFileA", "CreateFileW"]`).
+    #[serde(default)]
+    pub api_name: Vec<serde_json::Value>,
+}
+
 impl ApiMetadata {
-    /// Get the API location DLLs as strings.
+    /// API location DLLs as strings.
     #[must_use]
     pub fn locations(&self) -> Vec<String> {
         values_as_strings(&self.api_location)
     }
-    /// Get the function name variants as strings.
+    /// Function name variants as strings.
     #[must_use]
     pub fn names(&self) -> Vec<String> {
         values_as_strings(&self.api_name)
     }
-    /// Get the short description, if present.
+    /// Short description, if present.
     #[must_use]
     pub fn description_str(&self) -> Option<&str> {
         self.description.as_str()
     }
 }
 
+/// Per-parameter metadata from MSDN documentation.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ParamMetadata {
+    /// SAL-style directions (e.g., `["in"]`, `["in", "optional"]`, `["out"]`).
+    #[serde(default)]
+    pub directions: Vec<serde_json::Value>,
+    /// Known constant values for this parameter (e.g., `{"FILE_SHARE_READ": 1}`).
+    #[serde(default)]
+    pub values: HashMap<String, serde_json::Value>,
+}
+
 impl ParamMetadata {
-    /// Get the directions as strings.
+    /// Directions as strings.
     #[must_use]
     pub fn direction_strings(&self) -> Vec<String> {
         values_as_strings(&self.directions)
     }
 }
 
+/* ─────────────────────────── Value helpers ──────────────────────────────── */
+
+fn value_as_display(v: &serde_json::Value) -> Option<String> {
+    match v {
+        serde_json::Value::String(s) => Some(s.clone()),
+        serde_json::Value::Array(arr) => {
+            let strs: Vec<&str> = arr.iter().filter_map(|v| v.as_str()).collect();
+            if strs.is_empty() {
+                None
+            } else {
+                Some(strs.join(", "))
+            }
+        }
+        _ => None,
+    }
+}
+
+fn values_as_strings(vals: &[serde_json::Value]) -> Vec<String> {
+    vals.iter()
+        .filter_map(|v| v.as_str().map(String::from))
+        .collect()
+}
+
 /* ──────────────────────── Compressed data embedding ────────────────────── */
 
-/// Gzip-compressed sparse JSON for the SDK dataset, embedded at compile time.
-/// Empty when no data was available at build time.
 static COMPRESSED_SDK: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/sparse_sdk.json.gz"));
-
-/// Gzip-compressed sparse JSON for the driver dataset, embedded at compile time.
 static COMPRESSED_DRIVER: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/sparse_driver.json.gz"));
 
-/// SDK-only lookup table.
-static LOOKUP_SDK: OnceLock<HashMap<String, FuncMetadata>> = OnceLock::new();
-/// Driver-only lookup table.
-static LOOKUP_DRIVER: OnceLock<HashMap<String, FuncMetadata>> = OnceLock::new();
+static LOOKUP_SDK: OnceLock<HashMap<String, SdkMetadata>> = OnceLock::new();
+static LOOKUP_DRIVER: OnceLock<HashMap<String, DriverMetadata>> = OnceLock::new();
 
 fn decompress(data: &[u8]) -> Option<String> {
     if data.is_empty() {
@@ -307,40 +358,18 @@ fn decompress(data: &[u8]) -> Option<String> {
     Some(out)
 }
 
-fn load(data: &[u8], source: Source) -> HashMap<String, FuncMetadata> {
-    let Some(json) = decompress(data) else {
-        return HashMap::new();
-    };
-
-    let mut map: HashMap<String, FuncMetadata> =
-        serde_json::from_str(&json).expect("failed to parse sparse JSON");
-
-    // Driver-only metadata is gated behind the source: deserialize the same
-    // JSON a second time into DriverMetadata and attach to each entry. This
-    // keeps the FuncMetadata struct uniform while ensuring driver fields are
-    // *only* exposed for driver-source entries.
-    if matches!(source, Source::Driver) {
-        let raw: HashMap<String, DriverMetadata> =
-            serde_json::from_str(&json).expect("failed to parse driver metadata");
-        for (name, dm) in raw {
-            if let Some(entry) = map.get_mut(&name) {
-                entry.driver = Some(dm);
-            }
-        }
-    }
-
-    for v in map.values_mut() {
-        v.source = Some(source);
-    }
-    map
+fn load<T: serde::de::DeserializeOwned>(data: &[u8]) -> HashMap<String, T> {
+    decompress(data)
+        .map(|json| serde_json::from_str(&json).expect("failed to parse sparse JSON"))
+        .unwrap_or_default()
 }
 
-fn sdk_lookup() -> &'static HashMap<String, FuncMetadata> {
-    LOOKUP_SDK.get_or_init(|| load(COMPRESSED_SDK, Source::Sdk))
+fn sdk_lookup() -> &'static HashMap<String, SdkMetadata> {
+    LOOKUP_SDK.get_or_init(|| load(COMPRESSED_SDK))
 }
 
-fn driver_lookup() -> &'static HashMap<String, FuncMetadata> {
-    LOOKUP_DRIVER.get_or_init(|| load(COMPRESSED_DRIVER, Source::Driver))
+fn driver_lookup() -> &'static HashMap<String, DriverMetadata> {
+    LOOKUP_DRIVER.get_or_init(|| load(COMPRESSED_DRIVER))
 }
 
 /* ─────────────────────────── Public API ─────────────────────────────────── */
@@ -351,40 +380,41 @@ fn driver_lookup() -> &'static HashMap<String, FuncMetadata> {
 /// function-name spaces are largely disjoint (user-mode Win32 vs.
 /// kernel/WDF DDIs) so collisions are rare; when one happens, SDK wins.
 ///
-/// Returns `None` if the function isn't in either dataset, or if no
-/// sparse data was embedded at build time.
+/// For mode-aware callers, prefer [`lookup_sdk`] / [`lookup_driver`] and
+/// pick the right one based on context.
 #[must_use]
-pub fn lookup(name: &str) -> Option<&'static FuncMetadata> {
-    sdk_lookup()
-        .get(name)
-        .or_else(|| driver_lookup().get(name))
+pub fn lookup(name: &str) -> Option<Entry<'static>> {
+    if let Some(m) = sdk_lookup().get(name) {
+        return Some(Entry::Sdk(m));
+    }
+    driver_lookup().get(name).map(Entry::Driver)
 }
 
 /// Look up metadata for a function by name in the SDK dataset only.
 #[must_use]
-pub fn lookup_sdk(name: &str) -> Option<&'static FuncMetadata> {
+pub fn lookup_sdk(name: &str) -> Option<&'static SdkMetadata> {
     sdk_lookup().get(name)
 }
 
 /// Look up metadata for a function by name in the driver dataset only.
 #[must_use]
-pub fn lookup_driver(name: &str) -> Option<&'static FuncMetadata> {
+pub fn lookup_driver(name: &str) -> Option<&'static DriverMetadata> {
     driver_lookup().get(name)
 }
 
-/// Returns `true` if **any** sparse data was embedded at build time.
+/// `true` if **any** sparse data was embedded at build time.
 #[must_use]
 pub fn is_available() -> bool {
     is_available_sdk() || is_available_driver()
 }
 
-/// Returns `true` if the SDK dataset was embedded at build time.
+/// `true` if the SDK dataset was embedded at build time.
 #[must_use]
 pub fn is_available_sdk() -> bool {
     !COMPRESSED_SDK.is_empty()
 }
 
-/// Returns `true` if the driver dataset was embedded at build time.
+/// `true` if the driver dataset was embedded at build time.
 #[must_use]
 pub fn is_available_driver() -> bool {
     !COMPRESSED_DRIVER.is_empty()

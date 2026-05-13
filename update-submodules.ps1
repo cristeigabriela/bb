@@ -51,8 +51,8 @@ function Update-Sparse {
             uv sync --frozen
             if ($LASTEXITCODE -ne 0) { throw "uv sync failed" }
         } else {
-            Write-Host "uv not found on PATH — skipping `uv sync`." -ForegroundColor Yellow
-            Write-Host "  Install uv (https://docs.astral.sh/uv/) for the fastest build path." -ForegroundColor Yellow
+            Write-Host 'uv not found on PATH - skipping uv sync.' -ForegroundColor Yellow
+            Write-Host '  Install uv (https://docs.astral.sh/uv/) for the fastest build path.' -ForegroundColor Yellow
         }
     } finally {
         Pop-Location

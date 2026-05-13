@@ -47,22 +47,23 @@ To build without sparse data (faster builds, smaller binary), don't init the spa
 ## Usage
 
 ```rust
-// Look up metadata for a function — checks SDK first, then driver.
-if let Some(meta) = bb_sparse::lookup("CreateFileW") {
+use bb_sparse::{Entry, Metadata};
+
+// Combined lookup: returns an Entry tagged with its source. Use `as_metadata()`
+// to access shared fields without caring which dataset the entry came from.
+if let Some(entry) = bb_sparse::lookup("CreateFileW") {
+    let meta = entry.as_metadata();
     println!("DLL: {:?}", meta.dll_display());
     println!("Min client: {:?}", meta.min_client_str());
 
-    if let Some(pm) = meta.params.get("dwShareMode") {
+    if let Some(pm) = meta.params().get("dwShareMode") {
         println!("Directions: {:?}", pm.direction_strings());
         println!("Values: {:?}", pm.values);
     }
-}
 
-// Driver-only metadata (IRQL, KMDF/UMDF, target-type, ...) is gated behind
-// `.driver()`, which returns Some(...) only for entries from the driver
-// dataset.
-if let Some(meta) = bb_sparse::lookup("WdfCollectionAdd") {
-    if let Some(drv) = meta.driver() {
+    // Driver-only fields are accessible only when the entry is from the
+    // driver dataset.
+    if let Some(drv) = entry.driver() {
         if let Some(irql) = &drv.irql {
             println!("IRQL: {} {}", irql.op.as_deref().unwrap_or("="), irql.level);
         }
@@ -70,9 +71,17 @@ if let Some(meta) = bb_sparse::lookup("WdfCollectionAdd") {
     }
 }
 
-// Per-dataset queries.
-let sdk_only    = bb_sparse::lookup_sdk("CreateFileW");
-let driver_only = bb_sparse::lookup_driver("WdfCollectionAdd");
+// Typed per-dataset lookups give back concrete types directly.
+let sdk_only:    Option<&bb_sparse::SdkMetadata>    = bb_sparse::lookup_sdk("CreateFileW");
+let driver_only: Option<&bb_sparse::DriverMetadata> = bb_sparse::lookup_driver("WdfCollectionAdd");
+
+// Numeric IRQL comparisons (resolves PASSIVE_LEVEL etc. via your own
+// `HashMap<String, u64>` of kernel-mode constants — bb-funcs builds this
+// from a macro-preprocessed translation unit).
+let filter = bb_sparse::irql::parse_constraint("<= DISPATCH_LEVEL")?;
+let matches = driver_only
+    .and_then(|d| d.irql.as_ref())
+    .and_then(|c| c.matches(&filter, &irql_consts));
 
 // Availability + counts.
 if bb_sparse::is_available() {

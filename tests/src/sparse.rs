@@ -11,7 +11,7 @@
 
 #![cfg(test)]
 
-use bb_sparse::Source;
+use bb_sparse::{Entry, Metadata};
 
 /* ───────────────────────────── Smoke invariants ─────────────────────────── */
 
@@ -57,12 +57,6 @@ fn sdk_createfilew_has_expected_metadata() {
     }
     let m = bb_sparse::lookup_sdk("CreateFileW").expect("CreateFileW missing from SDK dataset");
 
-    assert_eq!(m.source, Some(Source::Sdk));
-    assert!(
-        m.driver().is_none(),
-        "SDK entry should not expose driver metadata"
-    );
-
     // Shared fields — anchored on the well-known MSDN values.
     assert_eq!(m.header_str(), Some("fileapi.h"));
     assert_eq!(m.lib_display().as_deref(), Some("Kernel32.lib"));
@@ -85,14 +79,14 @@ fn sdk_createfilew_has_expected_metadata() {
         "hTemplateFile",
     ] {
         assert!(
-            m.params.contains_key(p),
+            m.params().contains_key(p),
             "CreateFileW missing parameter {p}"
         );
     }
 
     // dwShareMode carries the well-known FILE_SHARE_* constant set.
     let share = m
-        .params
+        .params()
         .get("dwShareMode")
         .expect("dwShareMode parameter");
     for v in ["FILE_SHARE_READ", "FILE_SHARE_WRITE", "FILE_SHARE_DELETE"] {
@@ -103,7 +97,7 @@ fn sdk_createfilew_has_expected_metadata() {
     }
 
     // ApiMetadata: names contain the A/W/base variants; description present.
-    let api = m.metadata.as_ref().expect("CreateFileW has metadata");
+    let api = m.api_metadata().expect("CreateFileW has metadata");
     let names = api.names();
     for v in ["CreateFile", "CreateFileA", "CreateFileW"] {
         assert!(
@@ -131,14 +125,9 @@ fn driver_entry_exposes_driver_metadata() {
     let m = bb_sparse::lookup_driver("GET_VENDOR_ID_FROM_PARAMSET")
         .expect("GET_VENDOR_ID_FROM_PARAMSET missing from driver dataset");
 
-    assert_eq!(m.source, Some(Source::Driver));
     assert_eq!(m.header_str(), Some("a2dpsidebandaudio.h"));
-
-    let drv = m
-        .driver()
-        .expect("driver-source entry should expose driver()");
-    assert_eq!(drv.tech_root_str(), Some("audio"));
-    assert_eq!(drv.construct_type_str(), Some("function"));
+    assert_eq!(m.tech_root_str(), Some("audio"));
+    assert_eq!(m.construct_type_str(), Some("function"));
 }
 
 #[test]
@@ -152,16 +141,15 @@ fn driver_entry_has_irql_and_kmdf_when_documented() {
     // field set.
     let m = bb_sparse::lookup_driver("MBB_DEVICE_CONFIG_INIT")
         .expect("MBB_DEVICE_CONFIG_INIT missing from driver dataset");
-    let drv = m.driver().expect("driver metadata expected");
 
-    let irql = drv.irql.as_ref().expect("expected an IRQL constraint");
+    let irql = m.irql.as_ref().expect("expected an IRQL constraint");
     assert_eq!(irql.level, "PASSIVE_LEVEL");
 
-    assert_eq!(drv.kmdf_ver_str(), Some("1.27"));
-    assert_eq!(drv.target_type_str(), Some("Universal"));
-    assert_eq!(drv.tech_root_str(), Some("netvista"));
+    assert_eq!(m.kmdf_ver_str(), Some("1.27"));
+    assert_eq!(m.target_type_str(), Some("Universal"));
+    assert_eq!(m.tech_root_str(), Some("netvista"));
 
-    let api = m.metadata.as_ref().expect("has API metadata");
+    let api = m.api_metadata().expect("has API metadata");
     assert!(
         api.description_str()
             .is_some_and(|d| d.contains("MBB_DEVICE_CONFIG")),
@@ -169,13 +157,56 @@ fn driver_entry_has_irql_and_kmdf_when_documented() {
     );
 }
 
+/* ────────────────────────── Entry / lookup precedence ───────────────────── */
+
 #[test]
 fn combined_lookup_prefers_sdk() {
     if !bb_sparse::is_available_sdk() {
         return;
     }
-    let Some(m) = bb_sparse::lookup("CreateFileW") else {
+    let Some(entry) = bb_sparse::lookup("CreateFileW") else {
         return;
     };
-    assert_eq!(m.source, Some(Source::Sdk));
+    assert!(matches!(entry, Entry::Sdk(_)));
+    // SDK entry has no `driver()`.
+    assert!(entry.driver().is_none());
+}
+
+#[test]
+fn entry_driver_returns_some_for_driver_source() {
+    if !bb_sparse::is_available_driver() {
+        return;
+    }
+    // Pick a name that lives in the driver dataset only.
+    let Some(entry) = bb_sparse::lookup("MBB_DEVICE_CONFIG_INIT") else {
+        return;
+    };
+    assert!(matches!(entry, Entry::Driver(_)));
+    let drv = entry.driver().expect("driver entry exposes .driver()");
+    assert!(drv.irql.is_some());
+}
+
+/* ─────────────────────────── IrqlConstraint smoke ───────────────────────── */
+
+#[test]
+fn irql_constraint_parses_and_matches() {
+    use std::collections::HashMap;
+
+    let filter = bb_sparse::irql::parse_constraint("<= DISPATCH_LEVEL").unwrap();
+    let lookup = HashMap::from([
+        ("PASSIVE_LEVEL".to_string(), 0u64),
+        ("DISPATCH_LEVEL".to_string(), 2u64),
+        ("HIGH_LEVEL".to_string(), 31u64),
+    ]);
+
+    let passive = bb_sparse::IrqlConstraint {
+        level: "PASSIVE_LEVEL".into(),
+        op: None,
+    };
+    let high = bb_sparse::IrqlConstraint {
+        level: "HIGH_LEVEL".into(),
+        op: None,
+    };
+    assert_eq!(passive.matches(&filter, &lookup), Some(true));
+    assert_eq!(high.matches(&filter, &lookup), Some(false));
 }

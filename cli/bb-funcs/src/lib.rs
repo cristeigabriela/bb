@@ -35,6 +35,38 @@ pub fn collect_funcs_filtered<'a>(
     filter.post_filter(funcs)
 }
 
+/// Apply an [`bb_sparse::IrqlConstraint`] filter to a list of functions.
+///
+/// Keeps only functions whose `bb-sparse` driver entry carries an
+/// [`bb_sparse::IrqlConstraint`] that `matches` the filter under the given
+/// numeric IRQL lookup (typically projected from the macro-preprocessed
+/// `ConstantLookup` via [`enriched::numeric_const_lookup`]).
+///
+/// Special case: an `ANY` filter level keeps every function (including
+/// SDK-only entries that have no IRQL constraint).
+#[must_use]
+pub fn apply_irql_filter<'a>(
+    funcs: Vec<Function<'a>>,
+    filter: &bb_sparse::IrqlConstraint,
+    numeric_lookup: &std::collections::HashMap<String, u64>,
+) -> Vec<Function<'a>> {
+    if filter.level == "ANY" {
+        return funcs;
+    }
+    funcs
+        .into_iter()
+        .filter(|f| {
+            let Some(drv) = bb_sparse::lookup_driver(f.get_name()) else {
+                return false;
+            };
+            let Some(irql) = drv.irql.as_ref() else {
+                return false;
+            };
+            irql.matches(filter, numeric_lookup) == Some(true)
+        })
+        .collect()
+}
+
 /// Iterate over function declarations in a [`TranslationUnit`].
 pub fn iter_funcs<'a>(tu: &'a TranslationUnit<'a>) -> impl Iterator<Item = Entity<'a>> {
     tu.get_entity()
@@ -261,6 +293,11 @@ pub struct FuncFilter {
 
     // SQL `WHERE` clause (applied after all other filters).
     pub where_clause: Option<String>,
+
+    // IRQL constraint filter. Applied outside `post_filter` (in `main.rs`)
+    // because it needs the macro-preprocessed constant lookup to resolve
+    // PASSIVE_LEVEL/DISPATCH_LEVEL/etc. to numeric values.
+    pub irql_filter: Option<bb_sparse::IrqlConstraint>,
 
     // Limit (applied last, after sort).
     pub first: Option<usize>,
