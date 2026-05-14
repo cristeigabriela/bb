@@ -89,9 +89,13 @@ impl<'a> Function<'a> {
     }
 
     /// Render a detailed ABI breakdown.
+    ///
+    /// Pass an optional [`TypedefIndex`](crate::TypedefIndex) to annotate
+    /// typedef'd param/return types with their canonical form. `None`
+    /// leaves the signature unannotated.
     #[must_use]
-    pub fn display_detail(&self) -> String {
-        crate::display::render_function_detail(self)
+    pub fn display_detail(&self, typedef_index: Option<&crate::TypedefIndex>) -> String {
+        crate::display::render_function_detail(self, typedef_index)
     }
 }
 

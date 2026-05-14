@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use bb_clang::{Field, Struct};
+use bb_clang::{Field, Struct, TypedefIndex};
 use bb_shared::glob_match;
 use bb_tui::{FileEntry, TuiData, matches_file};
 use ratatui::style::{Color, Modifier, Style};
@@ -17,14 +17,16 @@ enum Row<'a> {
 
 pub struct TypeData<'a> {
     structs: &'a [Struct<'a>],
+    typedef_index: &'a TypedefIndex,
     rows: Vec<Row<'a>>,
     files: Vec<FileEntry>,
 }
 
 impl<'a> TypeData<'a> {
-    pub fn new(structs: &'a [Struct<'a>]) -> Self {
+    pub fn new(structs: &'a [Struct<'a>], typedef_index: &'a TypedefIndex) -> Self {
         Self {
             structs,
+            typedef_index,
             rows: Vec::new(),
             files: vec![FileEntry {
                 name: "(all)".to_string(),
@@ -48,7 +50,7 @@ impl TuiData for TypeData<'_> {
     }
 
     fn render_row(&self, index: usize) -> Line<'static> {
-        render_row(&self.rows[index])
+        render_row(&self.rows[index], self.typedef_index)
     }
 
     fn rebuild_index(&mut self, search: Option<&str>) {
@@ -66,8 +68,16 @@ impl TuiData for TypeData<'_> {
                 continue;
             }
 
+            // Match the canonical name OR any typedef alias, so the user
+            // can search the TUI by `LARGE_INTEGER` and still find
+            // `_LARGE_INTEGER`.
             let name_matches = match search {
-                Some(pat) => glob_match(s.get_name(), pat, false),
+                Some(pat) => {
+                    glob_match(s.get_name(), pat, false)
+                        || s.get_aliases()
+                            .iter()
+                            .any(|a| glob_match(a, pat, false))
+                }
                 None => true,
             };
 
@@ -94,7 +104,7 @@ impl TuiData for TypeData<'_> {
 
 /* ──────────────────────────────── Rendering ─────────────────────────────── */
 
-fn render_row(row: &Row) -> Line<'static> {
+fn render_row(row: &Row, typedef_index: &TypedefIndex) -> Line<'static> {
     match row {
         Row::StructHeader(s) => {
             let mut spans = vec![Span::styled(
@@ -103,6 +113,15 @@ fn render_row(row: &Row) -> Line<'static> {
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
             )];
+
+            let aliases = s.get_aliases();
+            if !aliases.is_empty() {
+                spans.push(Span::raw("  "));
+                spans.push(Span::styled(
+                    format!("[aka {}]", aliases.join(", ")),
+                    Style::default().fg(Color::DarkGray),
+                ));
+            }
 
             if let Some(size) = s.get_size() {
                 spans.push(Span::raw("  "));
@@ -151,6 +170,22 @@ fn render_row(row: &Row) -> Line<'static> {
                     ty.to_string(),
                     Style::default().fg(Color::Cyan),
                 ));
+
+                // Dim `(canonical)` annotation for typedef'd field types
+                // — same logic as the CLI renderer, so HANDLE shows
+                // `(void *)`, LARGE_INTEGER shows `(_LARGE_INTEGER)`, etc.
+                let underlying = field.get_type_info().underlying_type.as_deref();
+                if let Some(canon) = bb_clang::display::typedef_annotation(
+                    ty,
+                    underlying,
+                    Some(typedef_index),
+                ) {
+                    spans.push(Span::raw(" "));
+                    spans.push(Span::styled(
+                        format!("({canon})"),
+                        Style::default().fg(Color::DarkGray),
+                    ));
+                }
             }
 
             spans.push(Span::raw("  "));
@@ -179,7 +214,12 @@ fn build_file_index(structs: &[Struct], pattern: Option<&str>) -> Vec<FileEntry>
 
     for s in structs {
         let name_matches = match pattern {
-            Some(pat) => glob_match(s.get_name(), pat, false),
+            Some(pat) => {
+                glob_match(s.get_name(), pat, false)
+                    || s.get_aliases()
+                        .iter()
+                        .any(|a| glob_match(a, pat, false))
+            }
             None => true,
         };
 

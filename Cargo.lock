@@ -274,6 +274,7 @@ dependencies = [
  "bb-sql",
  "clang",
  "clap",
+ "colored",
  "serde",
  "serde_json",
  "serial_test",

@@ -20,16 +20,21 @@ pub use function::{
     format_return_location, format_tags, render_function_detail, render_function_item,
     render_function_list,
 };
-pub use struct_::render_struct;
+pub use struct_::{render_struct, typedef_annotation};
 
-/// Render a type header line: styled name + optional type info + optional location.
+/// Render a type header line: styled name + optional type info +
+/// optional aliases chip + optional location.
 ///
-/// Anonymous names are dimmed; named types are cyan + bold.
+/// Anonymous names are dimmed; named types are cyan + bold. `type_name`,
+/// when given, is rendered in cyan (used for enum underlying-type tags).
+/// `aliases`, when non-empty, is rendered as a dim `[aka X, Y]` chip after
+/// the type info (used for struct typedef aliases).
 #[must_use]
 pub fn render_type_header(
     name: &str,
     is_anonymous: bool,
     type_name: Option<&str>,
+    aliases: &[String],
     location: Option<&SourceLocation>,
 ) -> String {
     let name_styled = if is_anonymous {
@@ -40,8 +45,13 @@ pub fn render_type_header(
     let type_info = type_name
         .map(|t| format!("  {}", t.cyan()))
         .unwrap_or_default();
+    let alias_chip = if aliases.is_empty() {
+        String::new()
+    } else {
+        format!("  {}", format!("[aka {}]", aliases.join(", ")).dimmed())
+    };
     let loc_info = location
         .map(|loc| format!(" {}", loc.to_string().dimmed()))
         .unwrap_or_default();
-    format!("{name_styled}{type_info}{loc_info}\n")
+    format!("{name_styled}{type_info}{alias_chip}{loc_info}\n")
 }

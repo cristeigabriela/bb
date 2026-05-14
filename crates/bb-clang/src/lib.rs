@@ -18,6 +18,7 @@ mod json;
 pub(crate) mod location;
 mod struct_;
 mod type_info;
+mod typedef;
 
 pub use constant::{
     ConstLookup, ConstValue, Constant, MacroBodyToken, StripOuterParens, TuEntityMap,
@@ -34,6 +35,7 @@ pub use location::{SourceLocation, entity_in_header};
 pub use struct_::Field;
 pub use struct_::Struct;
 pub use type_info::TypeInfo;
+pub use typedef::{Typedef, TypedefIndex, TypedefKind};
 
 // Re-export commonly used clang types for convenience
 pub use clang::{Entity, EntityKind, Index, TranslationUnit, Unsaved};

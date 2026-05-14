@@ -9,8 +9,10 @@ use std::collections::HashMap;
 use std::fmt::Write;
 
 use bb_arch::ToJson as AbiToJson;
-use bb_clang::display::{format_abi_param, format_return_location, format_tags};
-use bb_clang::{Constant, Function, Param, SourceLocation, ToJson};
+use bb_clang::display::{
+    format_abi_param, format_return_location, format_tags, typedef_annotation,
+};
+use bb_clang::{Constant, Function, Param, SourceLocation, ToJson, TypedefIndex};
 use bb_cli::terminal_width;
 use bb_consts_lib::{ConstFilter, collect_constants, collect_enums};
 use bb_sdk::SdkMode;
@@ -123,11 +125,15 @@ pub fn numeric_const_lookup(lookup: &ConstantLookup) -> HashMap<String, u64> {
 /* ─────────────────────── Full enriched detail view ─────────────────────── */
 
 /// Render the full enriched detail view for a function.
+///
+/// `typedef_index`, when supplied, annotates typedef'd parameter and
+/// return types with their canonical form in the ABI section.
 #[must_use]
 pub fn render_enriched_detail(
     f: &Function,
     mode: SdkMode,
     const_lookup: Option<&ConstantLookup>,
+    typedef_index: Option<&TypedefIndex>,
 ) -> String {
     let ef = EnrichedFunction::new_ref(f, mode);
     let entry = ef.entry;
@@ -135,7 +141,7 @@ pub fn render_enriched_detail(
 
     render_prototype(&mut out, f, entry);
     render_header_tags(&mut out, f, entry);
-    render_abi_section(&mut out, f);
+    render_abi_section(&mut out, f, typedef_index);
     if let Some(entry) = entry {
         render_arguments_section(&mut out, f, entry, const_lookup);
         render_info_section(&mut out, entry);
@@ -177,7 +183,7 @@ fn render_header_tags(out: &mut String, f: &Function, entry: Option<Entry<'_>>) 
 }
 
 /// ABI section: stack note, param rows, return location.
-fn render_abi_section(out: &mut String, f: &Function) {
+fn render_abi_section(out: &mut String, f: &Function, typedef_index: Option<&TypedefIndex>) {
     let _ = writeln!(out);
     let _ = writeln!(out, "  {}", "ABI".white().bold().underline());
 
@@ -197,13 +203,23 @@ fn render_abi_section(out: &mut String, f: &Function) {
         for (i, p) in params.iter().enumerate() {
             let is_last = i == params.len() - 1;
             let connector = if is_last { "╰─" } else { "├─" };
-            let _ = writeln!(out, "  {} {}", connector.dimmed(), format_abi_param(i, p));
+            let _ = writeln!(
+                out,
+                "  {} {}",
+                connector.dimmed(),
+                format_abi_param(i, p, typedef_index)
+            );
         }
     }
 
-    let ret_type = f.get_return_type_name().cyan();
+    let ret_raw = f.get_return_type_name();
+    let ret_styled_cyan = ret_raw.cyan();
     let ret_loc = format_return_location(f.get_return_location()).yellow();
-    let _ = writeln!(out, "  {} {ret_loc}  {ret_type}", "╰".dimmed());
+    let ret_cell = match typedef_annotation(ret_raw, None, typedef_index) {
+        Some(canon) => format!("{ret_styled_cyan} {}", format!("({canon})").dimmed()),
+        None => ret_styled_cyan.to_string(),
+    };
+    let _ = writeln!(out, "  {} {ret_loc}  {ret_cell}", "╰".dimmed());
 }
 
 /// Arguments section: per-param constant values in tables.

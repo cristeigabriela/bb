@@ -20,6 +20,13 @@ pub struct Struct<'a> {
     #[serde(skip)]
     entity: Entity<'a>,
     name: String,
+    /// Typedef names that resolve to this struct (e.g. `["LARGE_INTEGER"]`
+    /// for `_LARGE_INTEGER`). Populated by callers that have a
+    /// [`TypedefIndex`](crate::TypedefIndex) — see
+    /// [`Struct::with_aliases`]. Empty when no typedef points here, or
+    /// when the caller didn't supply an index.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    aliases: Vec<String>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     is_anonymous: bool,
     location: Option<SourceLocation>,
@@ -53,10 +60,41 @@ impl<'a> Struct<'a> {
         self.is_anonymous
     }
 
-    /// Renders this struct in a `WinDbg` `dt`-style format with Unicode box-drawing.
+    /// Typedef names that resolve to this struct.
+    ///
+    /// Empty unless the struct was constructed (or post-processed) with a
+    /// [`TypedefIndex`](crate::TypedefIndex) — see [`Self::with_aliases`].
     #[must_use]
-    pub fn display(&self, depth: usize, field_filter: Option<&str>) -> String {
-        display::render_struct(self, depth, field_filter)
+    pub fn get_aliases(&self) -> &[String] {
+        &self.aliases
+    }
+
+    /// Attach typedef alias names to this struct.
+    ///
+    /// `aliases` is typically obtained from
+    /// [`TypedefIndex::aliases_for`](crate::TypedefIndex::aliases_for)
+    /// using `self.get_name()` as the key. Consumed builder-style so call
+    /// sites stay concise.
+    #[must_use]
+    pub fn with_aliases(mut self, aliases: Vec<String>) -> Self {
+        self.aliases = aliases;
+        self
+    }
+
+    /// Renders this struct in a `WinDbg` `dt`-style format with Unicode box-drawing.
+    ///
+    /// `typedef_index`, when supplied, lets the renderer annotate typedef'd
+    /// field types with their canonical form (e.g. `HANDLE (void *)`,
+    /// `LARGE_INTEGER (_LARGE_INTEGER)`). Pass `None` for the legacy
+    /// non-annotated output.
+    #[must_use]
+    pub fn display(
+        &self,
+        depth: usize,
+        field_filter: Option<&str>,
+        typedef_index: Option<&crate::TypedefIndex>,
+    ) -> String {
+        display::render_struct(self, depth, field_filter, typedef_index)
     }
 
     /// Returns the names of expandable child types referenced by this struct's fields.
@@ -144,13 +182,23 @@ impl<'a> Struct<'a> {
 
 /* ─────────────────────────────── Conversions ────────────────────────────── */
 
-/// Generate [`Struct`] from entity that is either a [`EntityKind::ClassDecl`] or [`EntityKind::StructDecl`].
+/// Generate [`Struct`] from a record-like declaration entity.
+///
+/// Accepts [`EntityKind::ClassDecl`], [`EntityKind::StructDecl`], and
+/// [`EntityKind::UnionDecl`]. Unions are represented as a `Struct` with
+/// overlapping field offsets — the same model `WinDbg`'s `dt` uses — so
+/// callers don't need a separate union type to render or query them.
+/// Notable Windows examples: `LARGE_INTEGER`, `ULARGE_INTEGER`, and
+/// many `_FOO` definitions in winnt.h are unions.
 impl<'a> TryFrom<Entity<'a>> for Struct<'a> {
     type Error = StructError;
 
     fn try_from(entity: Entity<'a>) -> Result<Self, Self::Error> {
         let kind = entity.get_kind();
-        if !matches!(kind, EntityKind::ClassDecl | EntityKind::StructDecl) {
+        if !matches!(
+            kind,
+            EntityKind::ClassDecl | EntityKind::StructDecl | EntityKind::UnionDecl
+        ) {
             return Err(StructError::NotStructOrClass(kind));
         }
 
@@ -178,6 +226,7 @@ impl<'a> TryFrom<Entity<'a>> for Struct<'a> {
         Ok(Self {
             entity,
             name,
+            aliases: Vec::new(),
             is_anonymous,
             location,
             size,

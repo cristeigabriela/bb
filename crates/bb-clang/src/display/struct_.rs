@@ -8,6 +8,7 @@ use std::fmt::Write;
 use crate::ext::DeclarationKind;
 use crate::struct_::Field;
 use crate::struct_::Struct;
+use crate::typedef::TypedefIndex;
 
 /// Renders a struct in `WinDbg` `dt`-style format with Unicode box-drawing.
 ///
@@ -15,9 +16,25 @@ use crate::struct_::Struct;
 /// When recursing into a nested type, we add its name to the set; after returning,
 /// we remove it. This prevents infinite recursion while allowing the same type
 /// to appear in different branches.
+///
+/// `typedef_index`, when supplied, drives the dim `(canonical)` annotation
+/// next to each typedef'd field type — `HANDLE (void *)`, `PVOID (void *)`,
+/// `LARGE_INTEGER (_LARGE_INTEGER)`, etc. When `None`, falls back to the
+/// per-field `underlying_type` metadata, which covers struct typedefs only.
 #[must_use]
-pub fn render_struct(s: &Struct, depth: usize, field_filter: Option<&str>) -> String {
-    let mut out = super::render_type_header(s.get_name(), s.is_anonymous(), None, s.get_location());
+pub fn render_struct(
+    s: &Struct,
+    depth: usize,
+    field_filter: Option<&str>,
+    typedef_index: Option<&TypedefIndex>,
+) -> String {
+    let mut out = super::render_type_header(
+        s.get_name(),
+        s.is_anonymous(),
+        None,
+        s.get_aliases(),
+        s.get_location(),
+    );
 
     let mut seen = HashSet::new();
     seen.insert(s.get_name().to_string());
@@ -29,6 +46,7 @@ pub fn render_struct(s: &Struct, depth: usize, field_filter: Option<&str>) -> St
         "",
         field_filter,
         &mut seen,
+        typedef_index,
     );
 
     if let Some(size) = s.get_size() {
@@ -38,7 +56,38 @@ pub fn render_struct(s: &Struct, depth: usize, field_filter: Option<&str>) -> St
     out
 }
 
+/// Resolve the dim "(canonical)" annotation for a field type, if any.
+///
+/// Returns `None` when there is no annotation to render (type isn't a
+/// typedef, or canonical equals the displayed name). Centralized so the
+/// CLI, TUI, and function param renderers all use the same logic.
+#[must_use]
+pub fn typedef_annotation(
+    type_name: &str,
+    underlying_type: Option<&str>,
+    typedef_index: Option<&TypedefIndex>,
+) -> Option<String> {
+    // 1. Prefer the typedef index: works for any kind of typedef chain.
+    if let Some(idx) = typedef_index
+        && let Some(td) = idx.lookup(type_name)
+        && td.canonical != type_name
+    {
+        return Some(td.canonical.clone());
+    }
+
+    // 2. Fall back to the per-field underlying type: struct/union/enum only,
+    //    but still useful when no index is wired through.
+    if let Some(u) = underlying_type
+        && u != type_name
+    {
+        return Some(u.to_string());
+    }
+
+    None
+}
+
 /// Renders fields with Unicode box-drawing characters in a tree structure.
+#[allow(clippy::too_many_arguments)]
 fn write_fields(
     out: &mut String,
     fields: &[Field],
@@ -47,6 +96,7 @@ fn write_fields(
     prefix: &str,
     field_filter: Option<&str>,
     seen: &mut HashSet<String>,
+    typedef_index: Option<&TypedefIndex>,
 ) {
     let filtered: Vec<_> = fields
         .iter()
@@ -71,6 +121,25 @@ fn write_fields(
             name.white().bold()
         };
 
+        let type_cell = if let Some(name) = type_name {
+            let underlying = field.get_type_info().underlying_type.as_deref();
+            let annotation = typedef_annotation(name, underlying, typedef_index);
+            match annotation {
+                Some(canon) => format!("{} {}", name.cyan(), format!("({canon})").dimmed()),
+                None => name.cyan().to_string(),
+            }
+        } else {
+            format!(
+                "<anonymous {}>",
+                field
+                    .get_type()
+                    .get_declaration_kind_name()
+                    .unwrap_or("type")
+            )
+            .dimmed()
+            .to_string()
+        };
+
         let _ = writeln!(
             out,
             "{}{} {} {} {}  {}",
@@ -79,18 +148,7 @@ fn write_fields(
             offset.yellow(),
             format!("[{size}]").green(),
             name_styled,
-            if let Some(name) = type_name {
-                name.cyan()
-            } else {
-                format!(
-                    "<anonymous {}>",
-                    field
-                        .get_type()
-                        .get_declaration_kind_name()
-                        .unwrap_or("type")
-                )
-                .dimmed()
-            }
+            type_cell,
         );
 
         if current_depth < max_depth && field.has_children() {
@@ -113,6 +171,7 @@ fn write_fields(
                         &new_prefix,
                         None,
                         seen,
+                        typedef_index,
                     );
                 }
                 seen.remove(key);

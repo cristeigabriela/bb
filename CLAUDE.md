@@ -108,9 +108,12 @@ Tests use `serial_test` because libclang is not fully thread-safe. Integration t
 - **`Param::is_stack()`** and **`Param::size()`** are methods on the Param type for ABI queries.
 - **`entity_in_header()`** in `bb-clang/location.rs` is the shared header-matching helper used by all filter structs.
 - **`bb_cli::current_command_string()`** is used by all CLIs for JSON `"command"` fields.
-- **`format_abi_param()`** in `bb-clang/display/function.rs` is the shared ABI row formatter.
+- **`format_abi_param()`** in `bb-clang/display/function.rs` is the shared ABI row formatter. Takes an optional `&TypedefIndex` so typedef'd param types render with a dim `(canonical)` annotation (e.g. `HANDLE (void *)`).
 - **`format_tags()`** returns `Vec<String>` so callers can extend before joining.
 - **`TypeInfo`** in `bb-clang/type_info.rs` is the shared type metadata struct embedded (via `#[serde(flatten)]`) in both `Field` and `Param`. Constructed via `From<clang::Type>`. Exposes `underlying_type`, `is_const`, `is_volatile`, `is_restrict`, `is_pointer`, `pointer_depth`, `is_function_pointer`, `is_array`, `array_size`.
+- **`TypedefIndex`** in `bb-clang/typedef.rs` is a translation-unit-scoped map of every `EntityKind::TypedefDecl`. Each `Typedef` entry carries the alias name, the immediate target (`typedef_of`), the resolved canonical form (`canonical`), the optional `canonical_decl_name` (when the chain ends at a named record/enum), the full `chain` of intermediate steps, and a `TypedefKind` classification (`struct`, `union`, `enum`, `pointer`, `function_pointer`, `array`, `primitive`, `other`). Drives (1) alias-aware struct lookup in `bb-types`, (2) the `aliases: [...]` field on `Struct` JSON, (3) typedef-only hit reporting (`HANDLE`, `PVOID`), (4) the dim `(canonical)` annotation in CLI/TUI field & param renderers via `display::typedef_annotation`.
+- **`Struct`** accepts `StructDecl`, `ClassDecl`, **and `UnionDecl`** (unions are modeled with overlapping field offsets — needed for `LARGE_INTEGER` and friends).
+- **`Struct::display(depth, field_filter, typedef_index)`** takes an optional `&TypedefIndex` to drive header `[aka …]` aliases and inline field-type annotations. `Function::display_detail(typedef_index)` mirrors this for ABI rows + return type.
 - **bb-funcs `enriched` module** owns the sparse metadata rendering. Enriched JSON is composed by starting from `p.to_json()` / `f.to_json()` and extending with sparse metadata. bb-clang stays generic.
 - **bb-funcs `where_filter` module** evaluates SQL WHERE clauses via `bb-sql::Evaluator`.
 - **`bb_cli::terminal_width()`** is the shared terminal width helper used by all CLIs.
@@ -123,6 +126,7 @@ Tests use `serial_test` because libclang is not fully thread-safe. Integration t
 | `function/abi.rs` | Calling conventions + ABI parameter assignment engine |
 | `function/param.rs` | Param type with `is_stack()`, `size()`, embeds `TypeInfo` |
 | `type_info.rs` | Shared `TypeInfo` struct: type classification (pointer, array, const, volatile, function pointer, underlying type) |
+| `typedef.rs` | `TypedefIndex` / `Typedef` / `TypedefKind`: translation-unit-scoped typedef resolution (alias name → canonical form + chain + kind) |
 | `constant/tokens.rs` | Clang ↔ cexpr token conversion |
 | `constant/macro_.rs` | Macro resolution with identifier substitution |
 | `ext.rs` | Extension traits for clang types (`UnderlyingType`, `AnonymousType`, etc.) |

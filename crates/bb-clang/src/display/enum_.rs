@@ -31,6 +31,7 @@ pub fn render_enum_constants(
         e.get_name(),
         e.is_anonymous(),
         e.get_type_name(),
+        &[],
         e.get_location(),
     );
 

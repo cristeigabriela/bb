@@ -1,6 +1,7 @@
 mod data;
 
 use anyhow::Result;
+use bb_clang::TypedefIndex;
 use bb_cli::get_header_config;
 use bb_types_lib::{StructFilter, collect_structs};
 use clang::{Clang, Index};
@@ -51,17 +52,19 @@ fn main() -> Result<()> {
     // Parse headers.
     let tu = config.parse(&index, false)?;
 
+    let typedef_index = TypedefIndex::build(&tu);
+
     let filter = StructFilter {
         name_pattern: args.struct_name.clone(),
         header_filter: args.filter.clone(),
         case_sensitive: args.case_sensitive,
     };
-    let structs = collect_structs(&tu, &filter);
+    let structs = collect_structs(&tu, &filter, Some(&typedef_index));
 
     let initial_search = args.struct_name.as_deref().unwrap_or("");
 
     // Initialize and run the TUI.
-    let data = TypeData::new(&structs);
+    let data = TypeData::new(&structs, &typedef_index);
     let mut app = bb_tui::App::new(data, initial_search);
     bb_tui::event::run(&mut app)?;
 

@@ -1,12 +1,13 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
-use bb_clang::{Struct, ToJson};
+use bb_clang::{Struct, ToJson, Typedef, TypedefIndex};
 use bb_cli::{current_command_string, get_header_config, print_suggestions};
 use bb_sql::export_json_to_sqlite;
-use bb_types_lib::{StructFilter, collect_structs, iter_structs};
+use bb_types_lib::{StructFilter, collect_structs, find_typedef_hits, iter_structs};
 use clang::{Clang, Index};
 use clap::Parser;
+use colored::Colorize;
 use serde_json::Value;
 
 /* ─────────────────────────────────── CLI ────────────────────────────────── */
@@ -34,7 +35,8 @@ struct Args {
     #[arg(
         short = 's',
         long = "struct",
-        help = "Struct name pattern (supports * wildcard)"
+        help = "Struct name pattern (supports * wildcard). \
+                Matches typedef aliases too — `LARGE_INTEGER` finds `_LARGE_INTEGER`."
     )]
     struct_name: Option<String>,
 
@@ -73,30 +75,110 @@ fn main() -> Result<()> {
     // Parse headers.
     let tu = config.parse(&index, false)?;
 
+    // Build the typedef index once: needed to (1) discover aliases for
+    // every struct we render, (2) resolve typedef-only lookups like
+    // `HANDLE`, (3) drive the inline `(canonical)` annotation on field
+    // type cells.
+    let typedef_index = TypedefIndex::build(&tu);
+
     let filter = StructFilter {
         name_pattern: args.struct_name.clone(),
         header_filter: args.filter.clone(),
         case_sensitive: args.case_sensitive,
     };
-    let structs = collect_structs(&tu, &filter);
+    let structs = collect_structs(&tu, &filter, Some(&typedef_index));
 
-    // If no struct that matches our filter was found, try to print a suggestion.
-    if structs.is_empty() {
-        let names: Vec<String> = iter_structs(&tu).filter_map(|e| e.get_name()).collect();
+    // Resolve every typedef the user could reasonably want surfaced:
+    //
+    //  1. Typedefs whose **name** matches the search pattern. Surfaces
+    //     pointer/primitive typedefs that don't resolve to a struct
+    //     (e.g. `HANDLE`, `PVOID`) so they're never invisible.
+    //
+    //  2. Typedefs that resolve to any **rendered struct's canonical
+    //     name**. Surfaces struct aliases regardless of which name the
+    //     user typed — `-s LARGE_INTEGER` and `-s _LARGE_INTEGER` both
+    //     produce a `LARGE_INTEGER` typedef entry, so API consumers
+    //     always see the bidirectional mapping in one place.
+    //
+    // Results are merged + deduplicated by typedef name.
+    let rendered_canonical_names: std::collections::HashSet<&str> =
+        structs.iter().map(Struct::get_name).collect();
+    let typedef_hits: Vec<&Typedef> = {
+        let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        let mut acc: Vec<&Typedef> = Vec::new();
+
+        // Pattern matches.
+        for t in find_typedef_hits(&typedef_index, &filter) {
+            if seen.insert(t.name.as_str()) {
+                acc.push(t);
+            }
+        }
+
+        // Aliases of every rendered struct.
+        for s in &structs {
+            for alias_name in typedef_index.aliases_for(s.get_name()) {
+                if let Some(t) = typedef_index.lookup(alias_name)
+                    && seen.insert(t.name.as_str())
+                {
+                    acc.push(t);
+                }
+            }
+        }
+
+        acc.sort_by(|a, b| a.name.cmp(&b.name));
+        acc
+    };
+
+    // Suppress noise in plain-text rendering: a typedef stub printed
+    // inline below a struct render is redundant with the `[aka …]`
+    // chip in the struct header. JSON / SQLite always include the full
+    // typedef list, since machine consumers want both directions.
+    let typedef_hits_text: Vec<&Typedef> = typedef_hits
+        .iter()
+        .copied()
+        .filter(|t| {
+            t.canonical_decl_name
+                .as_deref()
+                .is_none_or(|c| !rendered_canonical_names.contains(c))
+        })
+        .collect();
+
+    // No-results suggestion: include both struct names and typedef names
+    // in the candidate pool. The user might be off by an underscore or a
+    // capitalization.
+    if structs.is_empty() && typedef_hits.is_empty() {
+        let struct_names: Vec<String> =
+            iter_structs(&tu).filter_map(|e| e.get_name()).collect();
+        let mut candidates: Vec<&str> = struct_names.iter().map(String::as_str).collect();
+        candidates.extend(typedef_index.names());
         print_suggestions(
-            "structs",
+            "structs or typedefs",
             args.struct_name.as_deref(),
-            names.iter().map(String::as_str),
+            candidates.into_iter(),
         );
     }
 
     if let Some(ref path) = args.sqlite {
         let json_rows: Vec<Value> = structs.iter().map(bb_clang::ToJson::to_json).collect();
         export_json_to_sqlite(path, "types", &json_rows)?;
+        // Export typedef hits to a sibling table for symmetry. Always
+        // create the table so consumers can rely on the schema; an empty
+        // typedef set produces an empty table.
+        let typedef_rows: Vec<Value> = typedef_hits
+            .iter()
+            .map(|t| serde_json::to_value(t).expect("Typedef serializes"))
+            .collect();
+        export_json_to_sqlite(path, "typedefs", &typedef_rows)?;
     } else if args.json {
-        print_json(structs.as_slice())?;
+        print_json(structs.as_slice(), &typedef_hits)?;
     } else {
-        print_display(structs.as_slice(), args.depth, &args.field_name);
+        print_display(
+            structs.as_slice(),
+            args.depth,
+            &args.field_name,
+            Some(&typedef_index),
+            &typedef_hits_text,
+        );
     }
 
     Ok(())
@@ -106,28 +188,110 @@ fn main() -> Result<()> {
 
 /// Print using `WinDbg` `dt`, tree-like structure style.
 ///
-/// # Arguments
-///
-/// * `structs` - The [`Struct`] entities to display.
-/// * `depth` - The depth of type expansion to be shown inline.
-/// * `field_name` - Particular field to filter for in [`Struct`].
-fn print_display(structs: &[Struct], depth: usize, field_name: &Option<String>) {
+/// Renders each struct (with typedef aliases in its header and dim
+/// `(canonical)` annotations on typedef'd field types), then renders any
+/// typedef-only hits (`HANDLE → PVOID → void *`) as a separate trailing
+/// section.
+fn print_display(
+    structs: &[Struct],
+    depth: usize,
+    field_name: &Option<String>,
+    typedef_index: Option<&TypedefIndex>,
+    typedef_hits: &[&Typedef],
+) {
     for s in structs {
-        print!("{}", s.display(depth, field_name.as_deref()));
+        print!("{}", s.display(depth, field_name.as_deref(), typedef_index));
+    }
+
+    if !typedef_hits.is_empty() {
+        if !structs.is_empty() {
+            println!();
+        }
+        println!("{}", "typedefs".white().bold().underline());
+        for t in typedef_hits {
+            print_typedef_summary(t);
+        }
     }
 }
 
-/// Print JSON with `types` and `referenced_types` arrays.
+/// One-line summary for a typedef-only hit.
 ///
-/// Uses [`ToJson::to_json_full`] on the struct slice to produce all matched
-/// types and their nested referenced types, fully expanded and deduplicated.
-fn print_json(structs: &[Struct]) -> anyhow::Result<()> {
+/// Example: `HANDLE  →  PVOID → void *   (pointer)  winnt.h:1234:5`.
+fn print_typedef_summary(t: &Typedef) {
+    let name = t.name.cyan().bold();
+    let arrow_chain: String = t
+        .chain
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .join(" → ");
+    let kind = format!("({})", typedef_kind_label(t.kind)).dimmed();
+    let loc = t
+        .location
+        .as_ref()
+        .map(|l| format!("  {}", l.to_string().dimmed()))
+        .unwrap_or_default();
+    println!("  {name}  →  {arrow_chain}   {kind}{loc}");
+}
+
+/// Human label for a [`bb_clang::TypedefKind`] in CLI output.
+const fn typedef_kind_label(k: bb_clang::TypedefKind) -> &'static str {
+    match k {
+        bb_clang::TypedefKind::Struct => "struct",
+        bb_clang::TypedefKind::Union => "union",
+        bb_clang::TypedefKind::Enum => "enum",
+        bb_clang::TypedefKind::FunctionPointer => "function pointer",
+        bb_clang::TypedefKind::Pointer => "pointer",
+        bb_clang::TypedefKind::Array => "array",
+        bb_clang::TypedefKind::Primitive => "primitive",
+        bb_clang::TypedefKind::Other => "other",
+    }
+}
+
+/// Print JSON with `types` and `typedefs` arrays, both always present.
+///
+/// Shape (designed for API consumers — predictable, no required indirection):
+///
+/// ```json
+/// {
+///   "command": "...",
+///   "types":    [ /* full Struct objects, each with `aliases` */ ],
+///   "typedefs": [
+///     {
+///       "name": "LARGE_INTEGER",
+///       "kind": "struct",
+///       "typedef_of": "_LARGE_INTEGER",
+///       "canonical": "_LARGE_INTEGER",
+///       "canonical_decl_name": "_LARGE_INTEGER",
+///       "chain": ["_LARGE_INTEGER"]
+///     },
+///     {
+///       "name": "HANDLE",
+///       "kind": "pointer",
+///       "typedef_of": "PVOID",
+///       "canonical": "void *",
+///       "chain": ["PVOID", "void *"]
+///     }
+///   ]
+/// }
+/// ```
+///
+/// - `types` is the full struct render (`ToJson::to_json_full`).
+/// - `typedefs` contains stubs for every typedef the user *searched* by
+///   name, including those that resolve to a struct already in `types`
+///   — so consumers can always look up by either name and find a clear
+///   pointer back to the canonical entry.
+fn print_json(structs: &[Struct], typedef_hits: &[&Typedef]) -> anyhow::Result<()> {
     let command = current_command_string();
+    let typedefs_value = serde_json::to_value(typedef_hits)?;
+
     let mut output = structs.to_json_full();
-    output
+    let obj = output
         .as_object_mut()
-        .unwrap()
-        .insert("command".to_string(), Value::String(command));
+        .expect("Struct slice to_json_full returns an object");
+    obj.insert("command".to_string(), Value::String(command));
+    obj.insert("typedefs".to_string(), typedefs_value);
+
     println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())
 }
