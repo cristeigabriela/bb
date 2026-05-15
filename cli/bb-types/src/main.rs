@@ -168,13 +168,27 @@ fn main() -> Result<()> {
     // inline below a struct render is redundant with the `[aka …]`
     // chip in the struct header. JSON / SQLite always include the full
     // typedef list, since machine consumers want both directions.
+    //
+    // Suppress when EITHER:
+    //  - `canonical_decl_name` names a rendered struct (direct alias
+    //    — `SECURITY_ATTRIBUTES` for `_SECURITY_ATTRIBUTES`).
+    //  - `underlying_record` names a rendered struct (pointer alias —
+    //    `LPSECURITY_ATTRIBUTES` whose canonical is `struct _… *` and
+    //    whose underlying_record is `_SECURITY_ATTRIBUTES`, which the
+    //    user is already seeing rendered above).
+    // Without the second check, pointer typedefs always survived the
+    // filter because their `canonical_decl_name` is always `None`.
     let typedef_hits_text: Vec<&Typedef> = typedef_hits
         .iter()
         .copied()
         .filter(|t| {
-            t.canonical_decl_name
-                .as_deref()
-                .is_none_or(|c| !rendered_canonical_names.contains(c))
+            let direct = t.canonical_decl_name.as_deref();
+            let via_pointer = t.properties.underlying_record.as_deref();
+            // Keep the typedef in text output unless one of its
+            // canonical-pointing fields names a struct we already
+            // rendered.
+            !direct.is_some_and(|c| rendered_canonical_names.contains(c))
+                && !via_pointer.is_some_and(|c| rendered_canonical_names.contains(c))
         })
         .collect();
 

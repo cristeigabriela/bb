@@ -35,8 +35,9 @@ pub struct TypeProperties {
     pub is_restrict: bool,
     pub is_pointer: bool,
     /// How many levels of pointer indirection (e.g. `PVOID**` = 2,
-    /// `HANDLE` = 1, plain `DWORD` = 0).
-    #[serde(skip_serializing_if = "is_zero")]
+    /// `HANDLE` = 1, plain `DWORD` = 0). Always emitted in JSON so
+    /// consumers can pair it with `is_pointer` without an
+    /// "absent = 0" special case.
     pub pointer_depth: usize,
     pub is_function_pointer: bool,
     pub is_array: bool,
@@ -100,16 +101,23 @@ impl TypeProperties {
         }
     }
 
-    /// Clear `underlying_record` if it matches the given display name.
+    /// Clear `underlying_record` and `underlying_type` if either matches
+    /// the given display name.
     ///
     /// Used by [`Field`](crate::Field) and [`Param`](crate::Param) to
     /// avoid redundant output when the rendered type name already says
-    /// `_LIST_ENTRY` and the record name would just repeat that.
+    /// `_LIST_ENTRY` and the record name would just repeat it, or when
+    /// the displayed type is itself the terminal primitive (e.g. a
+    /// plain `int` field shouldn't also emit `"underlying_type": "int"`
+    /// in JSON).
     pub fn suppress_underlying_record_if_matches(&mut self, display_name: Option<&str>) {
-        if let Some(ref r) = self.underlying_record
-            && display_name.is_some_and(|d| d == r)
-        {
-            self.underlying_record = None;
+        if let Some(d) = display_name {
+            if self.underlying_record.as_deref() == Some(d) {
+                self.underlying_record = None;
+            }
+            if self.underlying_type.as_deref() == Some(d) {
+                self.underlying_type = None;
+            }
         }
     }
 }
@@ -209,8 +217,13 @@ fn is_func_ptr(canonical: &Type) -> bool {
 /// Returns `None` when the leaf is a record/enum (use `underlying_record`
 /// instead) or a function type (use `is_function_pointer`).
 fn terminal_primitive_name(canonical: &Type<'_>) -> Option<String> {
+    // Cap detects runaway recursion on malformed types. Real chains
+    // are very shallow (≤ ~3 pointer/array layers); 64 is generous.
+    // Truncation emits an `eprintln!` so it doesn't silently produce
+    // wrong metadata.
+    const MAX_DEPTH: usize = 64;
     let mut current = canonical.get_canonical_type();
-    let mut guard = 0_usize;
+    let mut depth = 0_usize;
     loop {
         if let Some(pointee) = current.get_pointee_type() {
             current = pointee.get_canonical_type();
@@ -219,8 +232,12 @@ fn terminal_primitive_name(canonical: &Type<'_>) -> Option<String> {
         } else {
             break;
         }
-        guard += 1;
-        if guard > 64 {
+        depth += 1;
+        if depth >= MAX_DEPTH {
+            eprintln!(
+                "bb-clang: terminal_primitive_name walked {MAX_DEPTH}+ pointer/array \
+                 layers without bottoming out — abandoning"
+            );
             return None;
         }
     }
@@ -292,8 +309,3 @@ pub(crate) fn is_function_pointer(ty: &Type<'_>) -> bool {
     is_func_ptr(&ty.get_canonical_type())
 }
 
-/// Serde helper: skip serializing when value is zero.
-#[allow(clippy::trivially_copy_pass_by_ref)] // Required by serde skip_serializing_if signature.
-const fn is_zero(v: &usize) -> bool {
-    *v == 0
-}

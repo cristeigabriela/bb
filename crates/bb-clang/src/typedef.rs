@@ -56,7 +56,20 @@ pub enum TypedefKind {
     Array,
     /// Canonical type is a builtin scalar (int, void, char, ...).
     Primitive,
-    /// Anything else we don't classify (templates, dependent types, ...).
+    /// Anything else we don't classify. Shows up for:
+    ///
+    /// - C++ template instantiations (`typedef std::vector<int> IntVec;`).
+    ///   Clang surfaces these as `TypeKind::Unexposed` or similar template
+    ///   kinds that don't map cleanly to record / pointer / primitive.
+    /// - Dependent types in templates (`typedef typename T::value_type V;`).
+    /// - Member function pointers (`typedef int (Foo::*Fn)(int);`).
+    /// - SAL-annotated typedefs whose canonical is an unexposed attributed
+    ///   wrapper that clang doesn't unwrap further.
+    ///
+    /// In practice these don't appear in the Windows SDK / PHNT chains
+    /// we currently parse (those are C, not C++). Treat `Other` as a
+    /// signal that downstream rendering should fall back to the raw
+    /// `canonical` string rather than assume a structural shape.
     Other,
 }
 
@@ -141,7 +154,13 @@ impl TypedefIndex {
     #[must_use]
     pub fn build(tu: &TranslationUnit<'_>) -> Self {
         let mut by_name: HashMap<String, Typedef> = HashMap::new();
-        let mut aliases_by_canonical: HashMap<String, Vec<String>> = HashMap::new();
+        // Accumulate via HashSet so duplicate typedef declarations
+        // (same name seen through different include paths) collapse at
+        // insertion time instead of fanning out into the Vec and
+        // getting deduped at the end. Headers like winnt.h with deep
+        // re-inclusion would otherwise push the same alias 10+ times
+        // per canonical before the sort/dedup pass.
+        let mut alias_sets: HashMap<String, std::collections::HashSet<String>> = HashMap::new();
 
         for entity in tu.get_entity().get_children() {
             if entity.get_kind() != EntityKind::TypedefDecl {
@@ -152,10 +171,10 @@ impl TypedefIndex {
             };
 
             if let Some(canonical_decl) = td.canonical_decl_name.as_ref() {
-                aliases_by_canonical
+                alias_sets
                     .entry(canonical_decl.clone())
                     .or_default()
-                    .push(td.name.clone());
+                    .insert(td.name.clone());
             }
 
             // Last writer wins on duplicate names (multiple TU includes of
@@ -163,11 +182,15 @@ impl TypedefIndex {
             by_name.insert(td.name.clone(), td);
         }
 
-        // Stable, deterministic alias ordering.
-        for aliases in aliases_by_canonical.values_mut() {
-            aliases.sort();
-            aliases.dedup();
-        }
+        // Materialize to sorted Vecs for stable, deterministic output.
+        let aliases_by_canonical: HashMap<String, Vec<String>> = alias_sets
+            .into_iter()
+            .map(|(k, set)| {
+                let mut v: Vec<String> = set.into_iter().collect();
+                v.sort();
+                (k, v)
+            })
+            .collect();
 
         Self {
             by_name,
@@ -252,7 +275,12 @@ impl TypedefIndex {
         // with its own get_typedef_underlying_type.
         let mut chain: Vec<String> = Vec::new();
         let mut current = underlying;
-        let mut guard = 0_usize;
+        // Cap to detect runaway recursion on malformed headers. Real
+        // SDK chains are at most 3–4 deep; 64 leaves plenty of headroom
+        // while still catching cycles. Truncation emits an `eprintln!`
+        // so it surfaces during development instead of silently
+        // producing a wrong canonical.
+        const MAX_CHAIN: usize = 64;
         loop {
             chain.push(clean_type_name(&current));
 
@@ -267,10 +295,12 @@ impl TypedefIndex {
             };
             current = next;
 
-            guard += 1;
-            if guard > 64 {
-                // Defensive: walk shouldn't cycle for well-formed headers,
-                // but cap iterations rather than spinning forever.
+            if chain.len() >= MAX_CHAIN {
+                eprintln!(
+                    "bb-clang: typedef chain for `{name}` exceeded {MAX_CHAIN} steps; \
+                     truncating at `{}` — chain may not reflect the true canonical",
+                    chain.last().map(String::as_str).unwrap_or("<?>")
+                );
                 break;
             }
         }
@@ -311,11 +341,15 @@ impl TypedefIndex {
 
 /// Normalize a [`Type`] to a clean display string suitable for API output.
 ///
-/// For struct/union/enum types, drops the leading `struct `/`union `/
-/// `enum ` keyword that `Type::get_display_name` includes — programmers
-/// have the `kind` field for that distinction, so the keyword would just
-/// be redundant noise in cross-references. For typedef and pointer/array
-/// types, falls back to the display name (which is already clean).
+/// For struct/class/union/enum types, drops the leading
+/// `struct `/`class `/`union `/`enum ` keyword that
+/// `Type::get_display_name` includes — programmers have the `kind`
+/// field for that distinction, so the keyword would just be redundant
+/// noise in cross-references. For typedef and pointer/array types,
+/// falls back to the display name (already clean) but strips the same
+/// keyword prefixes in case clang surfaces an elaborated form (rare —
+/// happens for some C++ template instantiations and anonymous
+/// records).
 fn clean_type_name(ty: &Type<'_>) -> String {
     // For typedef types, the display name *is* the typedef alias name
     // (e.g. "PVOID", "HANDLE"). That's exactly what we want for chain
@@ -331,7 +365,15 @@ fn clean_type_name(ty: &Type<'_>) -> String {
     }
     // Pointers, arrays, primitives, and anonymous records: clang's
     // display name is already the right thing (`void *`, `int`, etc.).
-    ty.get_display_name()
+    // Defensively strip elaborated `struct ` / `class ` / `union ` /
+    // `enum ` prefixes if any leaked through (some C++ headers do).
+    let raw = ty.get_display_name();
+    for prefix in ["struct ", "class ", "union ", "enum "] {
+        if let Some(rest) = raw.strip_prefix(prefix) {
+            return rest.to_string();
+        }
+    }
+    raw
 }
 
 /// Classify the terminal type of a typedef chain.
