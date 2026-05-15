@@ -1,13 +1,12 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
-use bb_clang::{Struct, ToJson};
-use bb_cli::{current_command_string, get_header_config, print_suggestions};
+use bb_clang::TypedefIndex;
+use bb_cli::{current_command_string, get_header_config};
 use bb_sql::export_json_to_sqlite;
-use bb_types_lib::{StructFilter, collect_structs, iter_structs};
+use bb_types_lib::{StructFilter, TypeResults, collect_results, suggest_alternatives};
 use clang::{Clang, Index};
 use clap::Parser;
-use serde_json::Value;
 
 /* ─────────────────────────────────── CLI ────────────────────────────────── */
 
@@ -21,7 +20,6 @@ struct Args {
     #[command(flatten)]
     shared: bb_cli::SharedArgs,
 
-    // Common options
     #[arg(long, help = "Output as JSON")]
     json: bool,
     #[arg(
@@ -34,7 +32,9 @@ struct Args {
     #[arg(
         short = 's',
         long = "struct",
-        help = "Struct name pattern (supports * wildcard)"
+        help = "Struct or union name pattern (supports * wildcard). \
+                Matches typedef aliases too — `LARGE_INTEGER` finds the union `_LARGE_INTEGER`, \
+                `OVERLAPPED` finds the struct `_OVERLAPPED`."
     )]
     struct_name: Option<String>,
 
@@ -60,74 +60,64 @@ struct Args {
     sqlite: Option<PathBuf>,
 }
 
+/* ────────────────────────────────── main ────────────────────────────────── */
+
 fn main() -> Result<()> {
     let args = Args::parse();
 
-    // Build header configuration.
     let config = get_header_config(&args.shared)?;
-
-    // Set up Clang.
     let clang_instance = Clang::new().expect("failed to initialize clang");
     let index = Index::new(&clang_instance, false, args.shared.diagnostics);
-
-    // Parse headers.
     let tu = config.parse(&index, false)?;
+    let typedef_index = TypedefIndex::build(&tu);
 
     let filter = StructFilter {
         name_pattern: args.struct_name.clone(),
         header_filter: args.filter.clone(),
         case_sensitive: args.case_sensitive,
     };
-    let structs = collect_structs(&tu, &filter);
+    let results = collect_results(&tu, &filter, &typedef_index);
 
-    // If no struct that matches our filter was found, try to print a suggestion.
-    if structs.is_empty() {
-        let names: Vec<String> = iter_structs(&tu).filter_map(|e| e.get_name()).collect();
-        print_suggestions(
-            "structs",
-            args.struct_name.as_deref(),
-            names.iter().map(String::as_str),
-        );
+    if results.is_empty() {
+        suggest_alternatives(&tu, &typedef_index, args.struct_name.as_deref());
     }
 
     if let Some(ref path) = args.sqlite {
-        let json_rows: Vec<Value> = structs.iter().map(bb_clang::ToJson::to_json).collect();
-        export_json_to_sqlite(path, "types", &json_rows)?;
+        export_json_to_sqlite(path, "types", &results.records_as_json_rows())?;
+        export_json_to_sqlite(path, "typedefs", &results.typedefs_as_json_rows()?)?;
     } else if args.json {
-        print_json(structs.as_slice())?;
+        print_json(&results)?;
     } else {
-        print_display(structs.as_slice(), args.depth, &args.field_name);
+        print_display(
+            &results,
+            args.depth,
+            args.field_name.as_deref(),
+            &typedef_index,
+        );
     }
 
     Ok(())
 }
 
-/* ──────────────────────────────── Printing ──────────────────────────────── */
+/* ───────────────────────────────── Printing ─────────────────────────────── */
 
-/// Print using `WinDbg` `dt`, tree-like structure style.
-///
-/// # Arguments
-///
-/// * `structs` - The [`Struct`] entities to display.
-/// * `depth` - The depth of type expansion to be shown inline.
-/// * `field_name` - Particular field to filter for in [`Struct`].
-fn print_display(structs: &[Struct], depth: usize, field_name: &Option<String>) {
-    for s in structs {
-        print!("{}", s.display(depth, field_name.as_deref()));
-    }
+/// Plain-text render of every struct + union + typedef hit, in
+/// `WinDbg` `dt` tree style.
+fn print_display(
+    results: &TypeResults,
+    depth: usize,
+    field_name: Option<&str>,
+    typedef_index: &TypedefIndex,
+) {
+    print!(
+        "{}",
+        results.format_display(depth, field_name, Some(typedef_index))
+    );
 }
 
-/// Print JSON with `types` and `referenced_types` arrays.
-///
-/// Uses [`ToJson::to_json_full`] on the struct slice to produce all matched
-/// types and their nested referenced types, fully expanded and deduplicated.
-fn print_json(structs: &[Struct]) -> anyhow::Result<()> {
-    let command = current_command_string();
-    let mut output = structs.to_json_full();
-    output
-        .as_object_mut()
-        .unwrap()
-        .insert("command".to_string(), Value::String(command));
+/// Pretty-printed JSON dump of the full query result.
+fn print_json(results: &TypeResults) -> Result<()> {
+    let output = results.to_json_value(current_command_string());
     println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())
 }

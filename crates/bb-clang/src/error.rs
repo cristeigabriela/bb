@@ -18,13 +18,17 @@ pub enum StructError {
 }
 
 #[derive(Debug, Error)]
+pub enum UnionError {
+    #[error("Entity is not a union: {0:?}")]
+    NotUnion(EntityKind),
+}
+
+#[derive(Debug, Error)]
 pub enum FieldError {
     #[error("Entity is not a field: {0:?}")]
     NotField(EntityKind),
     #[error("Entity does not have a type")]
     NoType,
-    #[error("Entity does not have a name")]
-    NoName,
     #[error("Entity's type does not have a size")]
     NoSize,
     #[error("Entity's type does not contain a field named {0} to get the offset of")]
@@ -91,6 +95,8 @@ pub enum Error {
     SourceLocation(#[from] SourceLocationError),
     #[error("Struct error: {0}")]
     Struct(#[from] StructError),
+    #[error("Union error: {0}")]
+    Union(#[from] UnionError),
     #[error("Field error: {0}")]
     Field(#[from] FieldError),
     #[error("Enum error: {0}")]

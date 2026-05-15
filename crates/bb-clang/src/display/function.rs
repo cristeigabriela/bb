@@ -11,6 +11,9 @@ use bb_arch::location::{MemoryOperand, ParamLocation, ReturnLocation};
 use colored::Colorize;
 
 use crate::function::{CallConv, Function, Param};
+use crate::typedef::TypedefIndex;
+
+use super::typedef_annotation;
 
 /* ────────────────────────── Operand formatting ─────────────────────────── */
 
@@ -100,9 +103,11 @@ fn format_param_sig(p: &Param) -> String {
 
 /// Format a single ABI parameter row: index, kind, location, size, type, name.
 ///
-/// Shared between `render_function_detail` and enriched rendering.
+/// Shared between `render_function_detail` and enriched rendering. When
+/// `typedef_index` is supplied, the type column is annotated with the
+/// canonical form for any typedef (e.g. `HANDLE (void *)`).
 #[must_use]
-pub fn format_abi_param(i: usize, p: &Param) -> String {
+pub fn format_abi_param(i: usize, p: &Param, typedef_index: Option<&TypedefIndex>) -> String {
     let kind = match p.get_abi_location() {
         ParamLocation::Direct { locations, .. } => match locations.first() {
             Some(MemoryOperand::Reg(_)) => "reg",
@@ -112,7 +117,13 @@ pub fn format_abi_param(i: usize, p: &Param) -> String {
         ParamLocation::Indirect { .. } => "indirect",
     };
     let loc_str = format_location(p.get_abi_location()).yellow();
-    let type_name = p.get_type_name().cyan();
+    let raw_type = p.get_type_name();
+    let type_styled = raw_type.cyan();
+    let underlying = p.get_type_info().underlying_record.as_deref();
+    let type_cell = match typedef_annotation(raw_type, underlying, typedef_index) {
+        Some(canon) => format!("{type_styled} {}", format!("({canon})").dimmed()),
+        None => type_styled.to_string(),
+    };
     let param_name = p.get_name().map_or_else(
         || "<unnamed>".dimmed().to_string(),
         |n| n.white().bold().to_string(),
@@ -123,7 +134,7 @@ pub fn format_abi_param(i: usize, p: &Param) -> String {
     let size_str = format!("[{size}]").green();
 
     let idx = i + 1;
-    format!("{idx}\t{kind:<8} {loc_str:<14} {size_str}  {type_name}  {param_name}")
+    format!("{idx}\t{kind:<8} {loc_str:<14} {size_str}  {type_cell}  {param_name}")
 }
 
 /// Render a single function as a tree list item with a connector.
@@ -180,9 +191,11 @@ pub fn render_function_list(funcs: &[Function]) -> String {
 /// Render a detailed ABI breakdown for a function.
 ///
 /// Shows the C signature as the tree root, with architecture/tags,
-/// parameter ABI locations, and return value placement as children.
+/// parameter ABI locations, and return value placement as children. When
+/// `typedef_index` is supplied, each parameter type and the return type
+/// gain a dim `(canonical)` annotation for typedef'd types.
 #[must_use]
-pub fn render_function_detail(f: &Function) -> String {
+pub fn render_function_detail(f: &Function, typedef_index: Option<&TypedefIndex>) -> String {
     let mut out = String::new();
 
     // Header: C signature as the tree root.
@@ -225,15 +238,24 @@ pub fn render_function_detail(f: &Function) -> String {
         for (i, p) in params.iter().enumerate() {
             let is_last = i == params.len() - 1;
             let connector = if is_last { "╰─" } else { "├─" };
-            let _ = writeln!(out, "{} {}", connector.dimmed(), format_abi_param(i, p));
+            let _ = writeln!(
+                out,
+                "{} {}",
+                connector.dimmed(),
+                format_abi_param(i, p, typedef_index)
+            );
         }
     }
 
     // Return value — always last child.
-    let ret_type = f.get_return_type_name().cyan();
-    let ret_loc = format_return_location(f.get_return_location());
-    let ret_styled = ret_loc.yellow();
-    let _ = writeln!(out, "{} {ret_styled}  {ret_type}", "╰".dimmed());
+    let ret_raw = f.get_return_type_name();
+    let ret_styled_cyan = ret_raw.cyan();
+    let ret_loc = format_return_location(f.get_return_location()).yellow();
+    let ret_cell = match typedef_annotation(ret_raw, None, typedef_index) {
+        Some(canon) => format!("{ret_styled_cyan} {}", format!("({canon})").dimmed()),
+        None => ret_styled_cyan.to_string(),
+    };
+    let _ = writeln!(out, "{} {ret_loc}  {ret_cell}", "╰".dimmed());
 
     out
 }

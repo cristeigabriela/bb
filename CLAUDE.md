@@ -14,7 +14,7 @@ The project runs on Windows only (requires MSVC build tools + libclang.dll).
 bb/
 ├── crates/              # Libraries (never produce binaries)
 │   ├── bb-arch          # Architecture enums, registers, ABI location types, JSON serialization
-│   ├── bb-clang         # libclang abstractions: Struct, Enum, Constant, Function, Param, TypeInfo
+│   ├── bb-clang         # libclang abstractions: Struct, Union, Enum, Constant, Function, Param, TypeInfo, RecordKind, AnonRef
 │   ├── bb-cli           # Shared CLI args (SharedArgs), suggestions, terminal_width, helpers
 │   ├── bb-sdk           # Windows SDK + PHNT header config, parsing, architecture defines
 │   ├── bb-shared         # Tiny utilities: glob_match, levenshtein, suggest_closest
@@ -108,9 +108,16 @@ Tests use `serial_test` because libclang is not fully thread-safe. Integration t
 - **`Param::is_stack()`** and **`Param::size()`** are methods on the Param type for ABI queries.
 - **`entity_in_header()`** in `bb-clang/location.rs` is the shared header-matching helper used by all filter structs.
 - **`bb_cli::current_command_string()`** is used by all CLIs for JSON `"command"` fields.
-- **`format_abi_param()`** in `bb-clang/display/function.rs` is the shared ABI row formatter.
+- **`format_abi_param()`** in `bb-clang/display/function.rs` is the shared ABI row formatter. Takes an optional `&TypedefIndex` so typedef'd param types render with a dim `(canonical)` annotation (e.g. `HANDLE (void *)`).
 - **`format_tags()`** returns `Vec<String>` so callers can extend before joining.
 - **`TypeInfo`** in `bb-clang/type_info.rs` is the shared type metadata struct embedded (via `#[serde(flatten)]`) in both `Field` and `Param`. Constructed via `From<clang::Type>`. Exposes `underlying_type`, `is_const`, `is_volatile`, `is_restrict`, `is_pointer`, `pointer_depth`, `is_function_pointer`, `is_array`, `array_size`.
+- **`TypedefIndex`** in `bb-clang/typedef.rs` is a translation-unit-scoped map of every `EntityKind::TypedefDecl`. Each `Typedef` entry carries the alias name, the immediate target (`typedef_of`), the resolved canonical form (`canonical`), the optional `canonical_decl_name` (when the chain ends at a named record/enum), the full `chain` of intermediate steps, and a `TypedefKind` classification (`struct`, `union`, `enum`, `pointer`, `function_pointer`, `array`, `primitive`, `other`). Drives (1) alias-aware struct lookup in `bb-types`, (2) the `aliases: [...]` field on `Struct` JSON, (3) typedef-only hit reporting (`HANDLE`, `PVOID`), (4) the dim `(canonical)` annotation in CLI/TUI field & param renderers via `display::typedef_annotation`.
+- **`Struct` vs `Union` are strictly separate types** since the Item-5 refactor. `Struct::try_from` accepts only `StructDecl` / `ClassDecl`; `Union::try_from` accepts only `UnionDecl`. Both carry `kind: RecordKind` (`Struct` / `Union`) for symmetric JSON dispatch. Top-level union typedefs like `LARGE_INTEGER` are findable via `collect_unions` and the `find_union_by_name` lib helper (parallels `collect_structs` / `find_struct_by_name`). Anonymous nested unions never appear at the TU root — they surface only inside their parent record's member list.
+- **`record.rs`** holds the shared `RecordKind` enum and the `AnonRef { kind, enclosing_record, field_path }` cross-reference used by anonymous nested records to point into the parent record's `referenced_types` slot.
+- **Anonymous nested records are synthesized as `Field` entries**. Under default MSVC parsing the `DUMMYUNIONNAME`/`DUMMYSTRUCTNAME` macros expand to empty, so clang represents the inner union as a `UnionDecl` *sibling* of the parent struct's FieldDecls — no `FieldDecl` wrapping. `build_anon_record_field` in `struct_/field.rs` synthesizes a `Field` for that decl with synthetic name `<anonymous_N>` (per-parent counter, separate counters for nameless FieldDecls vs sibling record decls), `is_anonymous: true`, an `anon_ref`, and an offset computed by `anon_record_offset_in_parent` (asks the parent's type for the offset of any reachable named member). The synthetic Field's `entity` is the record decl itself; `Field::get_field_decl()` returns `None` for these (real fields return `Some`).
+- **JSON shape: single `referenced_types` slot**. `Struct` / `Union` JSON outputs collapse into a uniform shape: `to_json` adds `referenced_types` as a name-string list of named referenced records; `to_json_full` adds it as full objects (named + anonymous, distinguished by per-entry `"kind"`). The mixed-record helper `bb_clang::records_to_json_full(structs, unions)` produces the top-level `{ types, referenced_types }` envelope shared by struct + union queries. The `bb-types` CLI wraps that with `command` and `typedefs`.
+- **`Struct::display(depth, field_filter, typedef_index)`** takes an optional `&TypedefIndex` to drive header `[aka …]` aliases and inline field-type annotations. `Union::display(...)` mirrors it. `Function::display_detail(typedef_index)` is analogous for ABI rows + return type.
+- **`TypedefKind::label()`** returns a human-readable string (`"struct"`, `"union"`, `"pointer"`, `"function pointer"`, etc.). Used by `display::format_typedef_summary` to render typedef-only hits like `HANDLE → PVOID → void *   (pointer)`.
 - **bb-funcs `enriched` module** owns the sparse metadata rendering. Enriched JSON is composed by starting from `p.to_json()` / `f.to_json()` and extending with sparse metadata. bb-clang stays generic.
 - **bb-funcs `where_filter` module** evaluates SQL WHERE clauses via `bb-sql::Evaluator`.
 - **`bb_cli::terminal_width()`** is the shared terminal width helper used by all CLIs.
@@ -123,12 +130,19 @@ Tests use `serial_test` because libclang is not fully thread-safe. Integration t
 | `function/abi.rs` | Calling conventions + ABI parameter assignment engine |
 | `function/param.rs` | Param type with `is_stack()`, `size()`, embeds `TypeInfo` |
 | `type_info.rs` | Shared `TypeInfo` struct: type classification (pointer, array, const, volatile, function pointer, underlying type) |
+| `typedef.rs` | `TypedefIndex` / `Typedef` / `TypedefKind` (+ `TypedefKind::label()` for display): translation-unit-scoped typedef resolution (alias name → canonical form + chain + kind) |
+| `record.rs` | `RecordKind` (Struct/Union) discriminator + `AnonRef { kind, enclosing_record, field_path }` cross-reference for anonymous nested records |
+| `struct_/mod.rs` | `Struct` type (rejects `UnionDecl`), `extract_nested_records` walker, `collect_nested_from_fields` |
+| `struct_/field.rs` | `Field` type. `build_anon_record_field` + `anon_record_offset_in_parent` synthesize Field entries for sibling anon-record decls. `Field::record_kind()` dispatches on the underlying type's kind. |
+| `union_/mod.rs` | `Union` type, parallel to `Struct` |
 | `constant/tokens.rs` | Clang ↔ cexpr token conversion |
 | `constant/macro_.rs` | Macro resolution with identifier substitution |
 | `ext.rs` | Extension traits for clang types (`UnderlyingType`, `AnonymousType`, etc.) |
-| `json.rs` | `ToJson` trait + impls for all entity types (Struct, Field, Enum, Constant, Function, Param) |
+| `json.rs` | `ToJson` trait + impls for all entity types (Struct, Union, Field, Enum, Constant, Function, Param). `records_to_json_full(structs, unions)` produces the mixed-kind `{ types, referenced_types }` envelope. |
 | `display/constant.rs` | Constant rendering |
 | `display/function.rs` | Function rendering (list, detail, shared formatters) |
+| `display/struct_.rs` | `render_struct` / `render_union` (mirrored), `typedef_annotation` for the dim `(canonical)` chip |
+| `display/typedef.rs` | `format_typedef_summary` — one-line typedef-only hit row |
 
 Files using trailing underscores (`struct_/`, `enum_/`, `macro_.rs`) follow the Rust convention for avoiding keyword conflicts.
 

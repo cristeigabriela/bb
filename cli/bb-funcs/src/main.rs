@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use bb_clang::Function;
+use bb_clang::TypedefIndex;
 use bb_clang::display::render_function_list;
 use bb_cli::{current_command_string, get_header_config, print_suggestions};
 use bb_funcs_lib::enriched::{
@@ -224,6 +225,10 @@ fn main() -> Result<()> {
 
     let mode = args.shared.mode;
 
+    // Build the typedef index once so the detail renderer can annotate
+    // typedef'd parameter / return types (e.g. `HANDLE (void *)`).
+    let typedef_index = TypedefIndex::build(&tu);
+
     if let Some(ref path) = args.sqlite {
         let json_rows: Vec<Value> = funcs
             .iter()
@@ -233,7 +238,13 @@ fn main() -> Result<()> {
     } else if args.json {
         print_json(funcs.as_slice(), mode, const_lookup.as_ref())?;
     } else {
-        print_display(funcs.as_slice(), detail, mode, const_lookup.as_ref());
+        print_display(
+            funcs.as_slice(),
+            detail,
+            mode,
+            const_lookup.as_ref(),
+            Some(&typedef_index),
+        );
     }
 
     Ok(())
@@ -246,10 +257,14 @@ fn print_display(
     detail: bool,
     mode: bb_sdk::SdkMode,
     const_lookup: Option<&ConstantLookup>,
+    typedef_index: Option<&TypedefIndex>,
 ) {
     if detail {
         for (i, f) in funcs.iter().enumerate() {
-            print!("{}", render_enriched_detail(f, mode, const_lookup));
+            print!(
+                "{}",
+                render_enriched_detail(f, mode, const_lookup, typedef_index)
+            );
             if i < funcs.len() - 1 {
                 println!();
             }
