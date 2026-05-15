@@ -25,6 +25,34 @@ jobs:
       - name: Set up MSVC environment
         uses: ilammy/msvc-dev-cmd@v1
 
+      - name: Install Windows Driver Kit (WDK)
+        shell: pwsh
+        run: |
+          # WDK provides kernel-mode headers (km/ntddk.h and friends)
+          # under Windows Kits\10\Include\<sdk-ver>\km\. The
+          # windows-latest image ships the SDK but not the WDK, so
+          # bb-sdk's `check_wdk_installed` flags kernel-mode parsing
+          # paths as unavailable. Install via winget so the kernel
+          # integration tests can actually parse those headers.
+          Write-Host "::group::winget install Microsoft.WindowsWDK.10.0.22621"
+          winget install `
+            --id Microsoft.WindowsWDK.10.0.22621 `
+            --silent `
+            --accept-source-agreements `
+            --accept-package-agreements `
+            --disable-interactivity
+          Write-Host "::endgroup::"
+
+          # Verify km/ntddk.h showed up somewhere clang can find it.
+          $ntddk = Get-ChildItem `
+            -Path 'C:\Program Files (x86)\Windows Kits\10\Include\*\km\ntddk.h' `
+            -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $ntddk) {
+            Write-Error "WDK install verification failed — no km/ntddk.h found under Windows Kits\10\Include\."
+            exit 1
+          }
+          Write-Host "WDK installed: $($ntddk.FullName)"
+
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
