@@ -233,16 +233,26 @@ pub fn check_wdk_installed(sdk: &SdkInfo) -> Result<()> {
 
 /* ---------------------------- Header generation --------------------------- */
 
-/// A group of related `#include` headers.
+/// A group of related `#include` headers, optionally preceded by raw
+/// preprocessor directives.
+///
+/// `pre_lines` lets a group emit arbitrary preprocessor text — typically
+/// `#undef X` — *between* the previous group's includes and this group's
+/// includes. The user-mode `ntstatus.h` group uses it for the
+/// `#undef WIN32_NO_STATUS` dance that lets `ntstatus.h`'s body emit
+/// after the windows.h chain has already been processed with the gate on.
+/// Kept empty (`&[]`) for groups that just `#include` headers.
 struct HeaderGroup {
     comment: &'static str,
+    pre_lines: &'static [&'static str],
     includes: &'static [&'static str],
 }
 
 /// Build a header string from structured components.
 ///
-/// Order: guarded `#define`s, raw `#define`s, grouped `#include`s, then
-/// `coda` (raw text appended verbatim after all groups).
+/// Order: guarded `#define`s, raw `#define`s, then grouped `#include`s.
+/// Each group emits in order: a `//`-comment header, its `pre_lines` raw
+/// directives, and its `#include` lines.
 ///
 /// Defines must come first so they apply when each header chain is parsed;
 /// in particular, kernel-mode `sdkddkver.h` (pulled in transitively by
@@ -250,16 +260,10 @@ struct HeaderGroup {
 /// by `ntdef.h` and so populates the `DECLSPEC_DEPRECATED_DDK_WINXP`
 /// family wdm.h depends on. Pulling `sdkddkver.h` in via a preamble
 /// `#include` ran it before `ntdef.h` and left those macros undefined.
-///
-/// `coda` is used for headers that need preprocessor scaffolding around
-/// their inclusion that doesn't fit the group abstraction — currently
-/// the `WIN32_NO_STATUS` dance for `ntstatus.h` in user mode (see
-/// [`sdk_header`]).
 fn build_header(
     guarded_defines: &[(&str, &str)],
     raw_defines: &[(&str, &str)],
     groups: &[HeaderGroup],
-    coda: &str,
 ) -> String {
     use std::fmt::Write;
 
@@ -278,67 +282,34 @@ fn build_header(
 
     for group in groups {
         let _ = writeln!(out, "// {}", group.comment);
+        for line in group.pre_lines {
+            let _ = writeln!(out, "{line}");
+        }
         for inc in group.includes {
             let _ = writeln!(out, "#include <{inc}>");
         }
         out.push('\n');
     }
 
-    if !coda.is_empty() {
-        out.push_str(coda);
-        if !coda.ends_with('\n') {
-            out.push('\n');
-        }
-    }
-
     out
 }
 
-/// User-mode coda: after the windows.h chain has set up its limited
-/// STATUS subset, undefine the gate and pull `ntstatus.h` for the full
-/// set. The `WIN32_NO_STATUS` define in [`user::GUARDED_DEFINES`] tells
-/// `winnt.h` to skip its inline `STATUS_*` defines; this coda then
-/// undefines it so `ntstatus.h`'s body actually emits.
-///
-/// Without this dance, user-mode `bb-consts` couldn't surface
-/// `STATUS_INVALID_HANDLE` and friends — they lived only in `ntstatus.h`,
-/// which was never reached from `windows.h`'s chain.
-const USER_NTSTATUS_CODA: &str = "// NTSTATUS codes (full set)\n\
-                                  #undef WIN32_NO_STATUS\n\
-                                  #include <ntstatus.h>\n";
-
-/// Kernel-mode coda: a direct `#include <ntstatus.h>`.
-///
-/// When the WDK is installed, `ntifs.h` already pulls `ntstatus.h`
-/// transitively and the `_NTSTATUS_` include guard makes this a
-/// harmless no-op. When the WDK is **not** installed (no `km/ntifs.h`),
-/// `ntstatus.h` lives in `shared/` which the plain SDK always ships,
-/// so STATUS codes still flow into the parse. Fixes the half of #24
-/// where kernel-mode users without a WDK install saw zero STATUS_*
-/// macros.
-const KERNEL_NTSTATUS_CODA: &str = "// NTSTATUS codes (direct, in case ntifs.h chain wasn't available)\n\
-                                    #include <ntstatus.h>\n";
-
 /// Generate the SDK header string for the given mode.
 ///
-/// For [`SdkMode::User`], sets up user-mode headers and defines plus the
-/// `WIN32_NO_STATUS` / `ntstatus.h` dance.
-/// For [`SdkMode::Kernel`], sets up kernel headers and defines plus a
-/// direct `ntstatus.h` include as a WDK-missing safety net.
+/// For [`SdkMode::User`], sets up user-mode headers and defines.
+/// For [`SdkMode::Kernel`], sets up kernel headers and defines.
+///
+/// Both modes terminate with an `ntstatus.h` HeaderGroup that ensures
+/// the full set of `STATUS_*` codes is available — user mode uses the
+/// `WIN32_NO_STATUS` dance (see `user::GROUPS`); kernel mode pulls
+/// `ntstatus.h` directly as a fallback for when ntifs.h's chain isn't
+/// reachable (no WDK installed).
 #[must_use]
 pub fn sdk_header(mode: SdkMode) -> String {
     match mode {
-        SdkMode::User => build_header(
-            user::GUARDED_DEFINES,
-            user::RAW_DEFINES,
-            user::GROUPS,
-            USER_NTSTATUS_CODA,
-        ),
-        SdkMode::Kernel => build_header(
-            kernel::GUARDED_DEFINES,
-            kernel::RAW_DEFINES,
-            kernel::GROUPS,
-            KERNEL_NTSTATUS_CODA,
-        ),
+        SdkMode::User => build_header(user::GUARDED_DEFINES, user::RAW_DEFINES, user::GROUPS),
+        SdkMode::Kernel => {
+            build_header(kernel::GUARDED_DEFINES, kernel::RAW_DEFINES, kernel::GROUPS)
+        }
     }
 }
