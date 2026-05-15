@@ -16,7 +16,7 @@ mod tests {
     use bb_funcs_lib::{
         FuncFilter, FuncSort, ParamCountFilter, collect_funcs, collect_funcs_filtered,
     };
-    use bb_sdk::{HeaderConfig, SdkMode};
+    use bb_sdk::{HeaderConfig, PhntVersion, SdkMode};
     use bb_types_lib::{
         StructFilter, collect_structs, collect_unions, find_struct_by_name, find_typedef_hits,
         find_union_by_name, iter_structs, iter_unions,
@@ -44,6 +44,25 @@ mod tests {
             let $tu = _cfg
                 .parse(&$index, true)
                 .context("parsing winsdk headers")?;
+        };
+    }
+
+    /// PHNT counterpart of [`winsdk!`]. Defaults to AMD64 / `Win11` /
+    /// user-mode unless overridden.
+    macro_rules! phnt {
+        ($clang:ident, $index:ident, $tu:ident) => {
+            phnt!($clang, $index, $tu, Arch::Amd64, PhntVersion::Win11, SdkMode::User);
+        };
+        ($clang:ident, $index:ident, $tu:ident, $arch:expr, $version:expr, $mode:expr) => {
+            let $clang = Clang::new()
+                .map_err(anyhow::Error::msg)
+                .context("initializing libclang")?;
+            let $index = Index::new(&$clang, false, false);
+            let _cfg = HeaderConfig::phnt($arch, $version, $mode)
+                .context("creating phnt header config")?;
+            let $tu = _cfg
+                .parse(&$index, true)
+                .context("parsing phnt headers")?;
         };
     }
 
@@ -515,6 +534,57 @@ mod tests {
         assert!(
             status_count > 1000,
             "expected thousands of STATUS_* codes in kernel mode, got {status_count}"
+        );
+
+        Ok(())
+    }
+
+    /// PHNT user-mode: regression test for the half of #24 / the
+    /// `cast_len` type-alias-macro fix surfaced during PR review.
+    ///
+    /// Before the fix only the four `STATUS_SEVERITY_*` integer-literal
+    /// macros came through — every `((NTSTATUS)0x…L)`-shaped code was
+    /// silently dropped because `um/powerbase.h` emitted a transient
+    /// `#define NTSTATUS LONG` (gated on `NT_SUCCESS` not yet being
+    /// defined, which is the case when `winternl.h` has been stripped
+    /// for phnt). That made `cast_len` refuse to strip the `(NTSTATUS)`
+    /// cast in `STATUS_*` bodies, so cexpr never evaluated them. The
+    /// fix taught `cast_len` to recognize type-alias macros (a macro
+    /// whose body is itself made of type-shaped tokens).
+    #[test]
+    #[serial]
+    fn status_codes_present_phnt_user_mode() -> anyhow::Result<()> {
+        phnt!(clang, index, tu);
+
+        let vars = collect_constants(&tu, &no_filter());
+
+        let success = vars
+            .iter()
+            .find(|c| c.get_name() == "STATUS_SUCCESS")
+            .expect("STATUS_SUCCESS must exist in phnt user mode");
+        assert_eq!(success.get_value().as_u64(), Some(0));
+
+        // STATUS_INVALID_HANDLE uses the NTSTATUS cast — this is the
+        // exact shape that pre-fix used to vanish.
+        let invalid_handle = vars
+            .iter()
+            .find(|c| c.get_name() == "STATUS_INVALID_HANDLE")
+            .expect(
+                "STATUS_INVALID_HANDLE must resolve in phnt user mode \
+                 (regression: cast_len had to recognize `#define NTSTATUS \
+                 LONG` from powerbase.h as a type-alias macro to strip \
+                 the `(NTSTATUS)` cast)",
+            );
+        assert_eq!(invalid_handle.get_value().as_u64(), Some(0xC000_0008));
+
+        let status_count = vars
+            .iter()
+            .filter(|c| c.get_name().starts_with("STATUS_"))
+            .count();
+        assert!(
+            status_count > 1000,
+            "expected thousands of STATUS_* codes in phnt user mode, got \
+             {status_count} (regression — was 4 before the cast_len fix)"
         );
 
         Ok(())
