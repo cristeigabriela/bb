@@ -81,14 +81,10 @@ pub struct Typedef {
     /// distinguishable from `is_function_pointer`, for example).
     pub kind: TypedefKind,
 
-    /// Immediate next link in the alias chain — what `typedef X Y;` was
-    /// written against. For `HANDLE`, this is `"PVOID"`. For
-    /// `LARGE_INTEGER`, this is `"_LARGE_INTEGER"` (the struct).
-    pub typedef_of: String,
-
     /// Final canonical display, after walking every intermediate typedef.
     /// For `HANDLE`, this is `"void *"`. For `LARGE_INTEGER`, this is
-    /// `"_LARGE_INTEGER"`.
+    /// `"_LARGE_INTEGER"`. Equal to `chain.last()`; kept as a top-level
+    /// field for ergonomics ("just give me the resolved name").
     pub canonical: String,
 
     /// Canonical declaration name when the chain ends at a named
@@ -102,8 +98,11 @@ pub struct Typedef {
     pub canonical_decl_name: Option<String>,
 
     /// Every step from `name` (exclusive) to `canonical` (inclusive).
-    /// For `HANDLE`, this is `["PVOID", "void *"]`. For a single-step
-    /// typedef like `LARGE_INTEGER`, this is `["_LARGE_INTEGER"]`.
+    /// `chain.first()` is the immediate alias target (what `typedef X Y;`
+    /// was written against); `chain.last()` equals `canonical`. For
+    /// `HANDLE` (when defined as `typedef PVOID HANDLE`), this is
+    /// `["PVOID", "void *"]`. For a single-step typedef like
+    /// `LARGE_INTEGER`, this is `["_LARGE_INTEGER"]`.
     pub chain: Vec<String>,
 
     /// Full type metadata, flattened into this object's JSON output so
@@ -247,11 +246,6 @@ impl TypedefIndex {
         // Field/Param — programmers see the same vocabulary everywhere.
         let properties = TypeProperties::from_type(&entity_type);
 
-        // First link in the chain: the *spelled* alias target, normalized
-        // (`_LARGE_INTEGER` rather than `union _LARGE_INTEGER`, `PVOID`
-        // rather than `PVOID`, `void *` kept as-is).
-        let typedef_of = clean_type_name(&underlying);
-
         // Walk the chain step-by-step, recording each link. After every
         // typedef link, the next type may itself be a typedef entity —
         // libclang exposes this via TypeKind::Typedef and a declaration
@@ -306,7 +300,6 @@ impl TypedefIndex {
         Some(Typedef {
             name,
             kind,
-            typedef_of,
             canonical,
             canonical_decl_name,
             chain,

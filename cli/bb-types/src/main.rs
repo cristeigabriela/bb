@@ -295,7 +295,6 @@ const fn typedef_kind_label(k: bb_clang::TypedefKind) -> &'static str {
 ///     {
 ///       "name": "LARGE_INTEGER",
 ///       "kind": "struct",
-///       "typedef_of": "_LARGE_INTEGER",
 ///       "canonical": "_LARGE_INTEGER",
 ///       "canonical_decl_name": "_LARGE_INTEGER",
 ///       "chain": ["_LARGE_INTEGER"]
@@ -303,9 +302,8 @@ const fn typedef_kind_label(k: bb_clang::TypedefKind) -> &'static str {
 ///     {
 ///       "name": "HANDLE",
 ///       "kind": "pointer",
-///       "typedef_of": "PVOID",
 ///       "canonical": "void *",
-///       "chain": ["PVOID", "void *"]
+///       "chain": ["void *"]
 ///     }
 ///   ]
 /// }

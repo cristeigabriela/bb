@@ -2168,9 +2168,11 @@ mod tests {
 
         let j = serde_json::to_value(td).expect("Typedef should serialize");
         assert_eq!(j["name"], "LARGE_INTEGER");
-        assert_eq!(j["typedef_of"], "_LARGE_INTEGER");
         assert_eq!(j["canonical"], "_LARGE_INTEGER");
         assert_eq!(j["canonical_decl_name"], "_LARGE_INTEGER");
+        // chain.first() carries what typedef_of used to be; chain.last()
+        // equals canonical.
+        assert_eq!(j["chain"][0], "_LARGE_INTEGER");
         // SDK encodes LARGE_INTEGER as a union; older or different SDKs
         // could use a struct. Accept both.
         let kind_str = j["kind"].as_str().expect("kind should be a string");
