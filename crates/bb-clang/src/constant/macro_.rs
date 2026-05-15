@@ -136,9 +136,14 @@ impl<'a> Constant<'a> {
                     let resolved = match comp_entity.get_kind() {
                         EntityKind::MacroDefinition => {
                             // Recurse: reuse the same tu_map.
-                            Self::try_from_macro_impl(comp_entity, resolving, tu_map, type_alias_cache)
-                                .or_else(|_| Constant::try_from(comp_entity))
-                                .ok()
+                            Self::try_from_macro_impl(
+                                comp_entity,
+                                resolving,
+                                tu_map,
+                                type_alias_cache,
+                            )
+                            .or_else(|_| Constant::try_from(comp_entity))
+                            .ok()
                         }
                         _ => Constant::try_from(comp_entity).ok(),
                     };

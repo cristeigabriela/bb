@@ -51,7 +51,14 @@ mod tests {
     /// user-mode unless overridden.
     macro_rules! phnt {
         ($clang:ident, $index:ident, $tu:ident) => {
-            phnt!($clang, $index, $tu, Arch::Amd64, PhntVersion::Win11, SdkMode::User);
+            phnt!(
+                $clang,
+                $index,
+                $tu,
+                Arch::Amd64,
+                PhntVersion::Win11,
+                SdkMode::User
+            );
         };
         ($clang:ident, $index:ident, $tu:ident, $arch:expr, $version:expr, $mode:expr) => {
             let $clang = Clang::new()
@@ -60,9 +67,7 @@ mod tests {
             let $index = Index::new(&$clang, false, false);
             let _cfg = HeaderConfig::phnt($arch, $version, $mode)
                 .context("creating phnt header config")?;
-            let $tu = _cfg
-                .parse(&$index, true)
-                .context("parsing phnt headers")?;
+            let $tu = _cfg.parse(&$index, true).context("parsing phnt headers")?;
         };
     }
 
