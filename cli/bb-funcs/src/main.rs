@@ -195,10 +195,19 @@ fn main() -> Result<()> {
         );
     }
 
-    // Build constant lookup if sparse data is available, OR if the user
-    // asked for `--irql` (it needs the same const lookup to resolve
-    // PASSIVE_LEVEL/DISPATCH_LEVEL/etc. to numeric values).
-    let const_lookup = if bb_sparse::is_available() || args.irql.is_some() {
+    // Build constant lookup if **mode-relevant** sparse data is available,
+    // OR if the user asked for `--irql` (it needs the same const lookup to
+    // resolve PASSIVE_LEVEL/DISPATCH_LEVEL/etc. to numeric values).
+    //
+    // The mode-aware check pairs with the strict mode isolation in
+    // `lookup_for_mode`: a user-mode run only consults the SDK dataset, so
+    // we shouldn't pay for the const lookup unless the SDK dataset has
+    // entries. Same idea for kernel + driver.
+    let sparse_available_for_mode = match args.shared.mode {
+        bb_sdk::SdkMode::User => bb_sparse::is_available_sdk(),
+        bb_sdk::SdkMode::Kernel => bb_sparse::is_available_driver(),
+    };
+    let const_lookup = if sparse_available_for_mode || args.irql.is_some() {
         Some(build_constant_lookup_from_tu(&tu))
     } else {
         None
