@@ -66,23 +66,29 @@ pub struct Field<'a> {
 impl<'a> Field<'a> {
     /// The underlying clang entity this `Field` was built from.
     ///
-    /// **Contract**: returns a [`EntityKind::FieldDecl`] for fields
-    /// constructed from a real C field declaration, OR a
-    /// [`EntityKind::StructDecl`] / [`EntityKind::UnionDecl`] /
-    /// [`EntityKind::ClassDecl`] for synthetic entries representing
-    /// anonymous nested records that appear as sibling decls (the
-    /// `DUMMYUNIONNAME`-expands-to-empty pattern under default MSVC
-    /// parsing). Use [`Self::get_field_decl`] when only a FieldDecl
-    /// will do, or check [`Self::is_anonymous`] / [`Self::get_anon_ref`]
-    /// to discriminate.
+    /// Contract — two cases:
+    ///
+    /// 1. A [`EntityKind::FieldDecl`] for fields built from a real C
+    ///    field declaration.
+    ///
+    /// 2. A [`EntityKind::StructDecl`] / [`EntityKind::UnionDecl`] /
+    ///    [`EntityKind::ClassDecl`] for synthetic entries representing
+    ///    anonymous nested records that appear as sibling decls (the
+    ///    `DUMMYUNIONNAME`-expands-to-empty pattern under default MSVC
+    ///    parsing).
+    ///
+    /// Use [`Self::get_field_decl`] when only a `FieldDecl` will do,
+    /// or check [`Self::is_anonymous`] / [`Self::get_anon_ref`] to
+    /// discriminate.
     #[must_use]
     pub const fn get_entity(&self) -> &Entity<'a> {
         &self.entity
     }
-    /// The FieldDecl this field was built from, if any.
+
+    /// The `FieldDecl` this field was built from, if any.
     ///
-    /// Returns `None` for synthetic anon-record entries — those have
-    /// no FieldDecl in clang's AST and store the record decl in
+    /// Returns `None` for synthetic anon-record entries: those have
+    /// no `FieldDecl` in clang's AST and store the record decl in
     /// [`Self::get_entity`] instead.
     #[must_use]
     pub fn get_field_decl(&self) -> Option<&Entity<'a>> {
@@ -92,10 +98,15 @@ impl<'a> Field<'a> {
             None
         }
     }
-    /// Semantic parent of this field. For real FieldDecls this is the
-    /// enclosing record; for synthetic anon-record entries this is
-    /// also the enclosing record (the anon record's
-    /// `semantic_parent`). Always meaningful in both cases.
+
+    /// Semantic parent of this field — always the enclosing record.
+    ///
+    /// Real `FieldDecl`s: clang reports the enclosing record directly.
+    ///
+    /// Synthetic anon-record entries: the anon record's own
+    /// `semantic_parent` resolves to the same enclosing record (because
+    /// the anon decl was visited as a child of that record in
+    /// `collect_fields`).
     #[must_use]
     pub const fn get_semantic_parent(&self) -> &Entity<'a> {
         &self.semantic_parent
@@ -165,11 +176,14 @@ impl<'a> Field<'a> {
         self.get_underlying_type().has_children()
     }
 
-    /// Classify the record kind of this field's underlying type, if
-    /// any. Returns `None` when the field's type isn't a record (it's
-    /// a primitive, function pointer, or unresolvable). Drives kind
-    /// dispatch in nested-record walkers without going through the
-    /// fallible `get_child_struct` / `get_child_union` constructors.
+    /// Classify the record kind of this field's underlying type.
+    ///
+    /// Returns `None` when the field's type isn't a record — it's a
+    /// primitive, a function pointer, or otherwise unresolvable.
+    ///
+    /// Drives kind dispatch in nested-record walkers without going
+    /// through the fallible `get_child_struct` / `get_child_union`
+    /// constructors.
     #[must_use]
     pub fn record_kind(&self) -> Option<RecordKind> {
         let decl = self.get_underlying_type().get_declaration()?;
@@ -180,9 +194,11 @@ impl<'a> Field<'a> {
         }
     }
 
-    /// The struct/class declaration this field's underlying type points
-    /// at, if any. Returns `None` for unions or non-record types — use
-    /// [`Self::get_child_union`] for unions.
+    /// The struct/class declaration this field's underlying type
+    /// points at, if any.
+    ///
+    /// Returns `None` for unions or non-record types.
+    /// Use [`Self::get_child_union`] for unions.
     #[must_use]
     pub fn get_child_struct(&self) -> Option<Struct<'a>> {
         let underlying = self.get_underlying_type();
@@ -202,12 +218,15 @@ impl<'a> Field<'a> {
         Struct::try_from(decl).ok()
     }
 
-    /// Collect the child fields of this field's underlying record
-    /// declaration, with anon-context inherited from this field's
-    /// [`AnonRef`] when present. Used by the display layer for inline
-    /// tree expansion.
+    /// Collect the child fields of this field's underlying record.
     ///
-    /// Returns an empty `Vec` when the underlying type isn't a record.
+    /// When this field carries an [`AnonRef`], the anon context
+    /// (enclosing record + field path) is inherited, so any synthetic
+    /// names assigned to grand-child anon decls continue to use a
+    /// consistent path prefix.
+    ///
+    /// Used by the display layer for inline tree expansion. Returns
+    /// an empty `Vec` when the underlying type isn't a record.
     #[must_use]
     pub fn get_child_fields(&self) -> Vec<Self> {
         let underlying = self.get_underlying_type();
@@ -231,8 +250,10 @@ impl<'a> Field<'a> {
     }
 
     /// The union declaration this field's underlying type points at,
-    /// if any. Returns `None` for structs or non-record types — use
-    /// [`Self::get_child_struct`] for structs.
+    /// if any.
+    ///
+    /// Returns `None` for structs or non-record types.
+    /// Use [`Self::get_child_struct`] for structs.
     #[must_use]
     pub fn get_child_union(&self) -> Option<Union<'a>> {
         let underlying = self.get_underlying_type();
@@ -254,20 +275,25 @@ impl<'a> Field<'a> {
 
 /// Collects all field declarations from a struct/class/union entity.
 ///
-/// `enclosing_record` is the outermost named ancestor's display name —
-/// for top-level records, the record's own name; for nested anonymous
-/// records, the same name propagated through the walk. `parent_path`
-/// is the chain of field names from `enclosing_record` down to (but
-/// not including) `parent` — empty at the top level.
+/// `enclosing_record` is the outermost named ancestor's display name.
+/// For a top-level record this is the record's own name; for nested
+/// anonymous records the same name propagates through the walk.
 ///
-/// Nameless members are accepted: each one gets a synthetic name
-/// `<anonymous_N>`. Two independent per-parent counters are
-/// maintained — one for nameless `FieldDecl`s and one for sibling
-/// anon-record decls (`StructDecl`/`UnionDecl`/`ClassDecl` with no
-/// surrounding FieldDecl) — so an ordering shuffle in clang's child
-/// visit order can't perturb existing identities. Both counters
-/// reset per `collect_fields` call, which matches the per-parent
-/// scoping in the JSON `field_path` semantics.
+/// `parent_path` is the chain of field names from `enclosing_record`
+/// down to (but not including) `parent`. Empty at the top level.
+///
+/// Nameless members are accepted with a synthetic name `<anonymous_N>`.
+/// Two independent per-parent counters drive the index `N`:
+///
+/// - `nameless_field_idx` — bumps for nameless `FieldDecl`s.
+/// - `sibling_decl_idx` — bumps for sibling anon-record decls
+///   (`StructDecl` / `UnionDecl` / `ClassDecl` with no enclosing
+///   FieldDecl).
+///
+/// Splitting the counters means an ordering shuffle in clang's child
+/// visit order can't perturb existing identities. Both counters reset
+/// per `collect_fields` call, matching the per-parent scoping in the
+/// JSON `field_path` semantics.
 #[must_use]
 pub fn collect_fields<'a>(
     parent: &Entity<'a>,
@@ -275,8 +301,9 @@ pub fn collect_fields<'a>(
     parent_path: &[String],
 ) -> Vec<Field<'a>> {
     let mut fields = Vec::new();
-    let mut nameless_field_idx = 0_usize;
-    let mut sibling_decl_idx = 0_usize;
+    let mut nameless_field_idx: usize = 0;
+    let mut sibling_decl_idx: usize = 0;
+
     parent.visit_children(|child, _| {
         match child.get_kind() {
             EntityKind::FieldDecl => {
@@ -299,14 +326,18 @@ pub fn collect_fields<'a>(
                     fields.push(field);
                 }
             }
-            // Anonymous nested record decls appear as direct children
-            // of the parent (siblings of FieldDecl) — this is how
-            // clang models the C macro pattern
-            // `union { ... } DUMMYUNIONNAME;` where the field name
-            // expands to empty under default MSVC parsing. We
-            // synthesize a Field for these so they appear in the
-            // layout at the right offset with an `anon_ref` into the
-            // referenced_unions / referenced_structs slot.
+
+            // Sibling anonymous record decls.
+            //
+            // Clang represents `union { ... } DUMMYUNIONNAME;` (where
+            // the macro expands to empty under default MSVC parsing) as
+            // an anonymous `UnionDecl` child of the parent struct — no
+            // wrapping `FieldDecl`.
+            //
+            // We synthesize a Field for each so the anon record shows
+            // up at its real offset in the parent's layout, with an
+            // `anon_ref` pointing into the parent's `referenced_types`
+            // slot for the body.
             EntityKind::StructDecl | EntityKind::ClassDecl | EntityKind::UnionDecl
                 if child.is_anonymous() =>
             {
@@ -318,10 +349,12 @@ pub fn collect_fields<'a>(
                     fields.push(field);
                 }
             }
+
             _ => {}
         }
         EntityVisitResult::Continue
     });
+
     fields
 }
 
@@ -457,15 +490,21 @@ fn build_anon_record_field<'a>(
     })
 }
 
-/// Walk the anonymous record's children for any reachable named
-/// member and use that member's offset in the parent as the anon
-/// record's own offset. Recurses through nested anonymous records
-/// (which is exactly the OVERLAPPED case — an anon union containing
-/// an anon struct whose `Offset` member is the first reachable
-/// named field).
+/// Compute the bit-offset of an anonymous record inside its parent.
 ///
-/// Returns the offset in bits (libclang's `get_offsetof` unit) or
-/// `None` if no reachable named member exists.
+/// Strategy: walk the anon record's children for any reachable named
+/// member, then ask the parent type for that member's offset. Under
+/// default MSVC parsing the anon record's members are hoisted into
+/// the parent's namespace, so the answer equals the anon record's
+/// own offset.
+///
+/// Recurses through nested anonymous records — the OVERLAPPED case
+/// (anon union → anon struct → `Offset`) bottoms out on the named
+/// `Offset` field even though every intermediate record is nameless.
+///
+/// Returns the offset in bits (libclang's `get_offsetof` unit), or
+/// `None` if no reachable named member exists. The caller treats
+/// `None` as a build failure rather than substituting zero.
 fn anon_record_offset_in_parent(
     parent_type: &clang::Type<'_>,
     anon_decl: &Entity<'_>,

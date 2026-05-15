@@ -21,11 +21,11 @@ use serde_json::Value;
 /// Collect every struct/class in the TU that matches `filter`.
 ///
 /// If `index` is supplied, each returned [`Struct`] is annotated with its
-/// typedef aliases (e.g. `_LARGE_INTEGER` will carry `["LARGE_INTEGER"]`).
+/// typedef aliases (e.g. `_FILETIME` will carry `["FILETIME"]`).
 /// The filter's name pattern is then matched against the struct's
 /// canonical name **and** every alias, so users can search by either form
-/// — `bb-types -s LARGE_INTEGER` and `bb-types -s _LARGE_INTEGER` both
-/// hit the same struct.
+/// — `bb-types -s FILETIME` and `bb-types -s _FILETIME` both hit the
+/// same struct.
 ///
 /// When `index` is `None`, behaves exactly like the legacy pre-typedef
 /// code path: name-only matching on `Entity::get_name()`, no aliases.
@@ -53,12 +53,6 @@ pub fn collect_structs<'a>(
 }
 
 /// Iterate over struct/class declarations in a [`TranslationUnit`].
-///
-/// Excludes [`EntityKind::UnionDecl`] — unions are surfaced through
-/// the parallel [`iter_unions`] and [`collect_unions`] entry points so
-/// the [`Struct`] / [`Union`] types stay strictly separated. Anonymous
-/// nested unions never appear as top-level decls in the TU, so the
-/// filter is exact.
 pub fn iter_structs<'a>(tu: &'a TranslationUnit<'a>) -> impl Iterator<Item = Entity<'a>> {
     tu.get_entity()
         .get_children()

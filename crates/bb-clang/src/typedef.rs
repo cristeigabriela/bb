@@ -56,20 +56,7 @@ pub enum TypedefKind {
     Array,
     /// Canonical type is a builtin scalar (int, void, char, ...).
     Primitive,
-    /// Anything else we don't classify. Shows up for:
-    ///
-    /// - C++ template instantiations (`typedef std::vector<int> IntVec;`).
-    ///   Clang surfaces these as `TypeKind::Unexposed` or similar template
-    ///   kinds that don't map cleanly to record / pointer / primitive.
-    /// - Dependent types in templates (`typedef typename T::value_type V;`).
-    /// - Member function pointers (`typedef int (Foo::*Fn)(int);`).
-    /// - SAL-annotated typedefs whose canonical is an unexposed attributed
-    ///   wrapper that clang doesn't unwrap further.
-    ///
-    /// In practice these don't appear in the Windows SDK / PHNT chains
-    /// we currently parse (those are C, not C++). Treat `Other` as a
-    /// signal that downstream rendering should fall back to the raw
-    /// `canonical` string rather than assume a structural shape.
+    /// Anything else we don't classify.
     Other,
 }
 
@@ -177,9 +164,7 @@ impl TypedefIndex {
         // Accumulate via HashSet so duplicate typedef declarations
         // (same name seen through different include paths) collapse at
         // insertion time instead of fanning out into the Vec and
-        // getting deduped at the end. Headers like winnt.h with deep
-        // re-inclusion would otherwise push the same alias 10+ times
-        // per canonical before the sort/dedup pass.
+        // getting deduped at the end.
         let mut alias_sets: HashMap<String, std::collections::HashSet<String>> = HashMap::new();
 
         for entity in tu.get_entity().get_children() {
