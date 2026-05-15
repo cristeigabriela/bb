@@ -359,7 +359,7 @@ mod tests {
     }
 
     /// Filter `= DISPATCH_LEVEL` asks: does the function's range cover
-    /// DISPATCH_LEVEL? `<= DISPATCH_LEVEL` (range [0, 2]) covers 2, so MATCH.
+    /// `DISPATCH_LEVEL`? `<= DISPATCH_LEVEL` (range [0, 2]) covers 2, so MATCH.
     #[test]
     fn range_eq_filter_checks_coverage() {
         let func_le = IrqlConstraint {
@@ -404,7 +404,7 @@ mod tests {
 
     /// A bare-level filter (`--irql APC_LEVEL`) is the same as
     /// `--irql "= APC_LEVEL"`: keep functions whose callable range
-    /// covers APC_LEVEL.
+    /// covers `APC_LEVEL`.
     #[test]
     fn bare_filter_is_equivalent_to_eq() {
         let bare = IrqlConstraint {

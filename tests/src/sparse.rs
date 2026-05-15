@@ -7,7 +7,7 @@
 //! environments without uv/Python), bb-sparse embeds an empty placeholder
 //! and `is_available_*` returns false — those tests degrade to compile-time
 //! + smoke checks rather than failing. CI initializes both submodules, so
-//! the data-bearing assertions run there.
+//!   the data-bearing assertions run there.
 
 #![cfg(test)]
 
@@ -93,7 +93,7 @@ fn sparse_coverage_dump() -> anyhow::Result<()> {
             100.0 * total_have as f64 / (total_have + total_miss_other).max(1) as f64
         );
         let mut rows: Vec<_> = per_header.into_iter().collect();
-        rows.sort_by(|a, b| b.1.2.cmp(&a.1.2));
+        rows.sort_by_key(|b| std::cmp::Reverse(b.1.2));
         println!("Top headers by free-function miss:");
         println!(
             "{:<32}{:>8}{:>10}{:>10}",
