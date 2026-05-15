@@ -31,7 +31,7 @@ use serde::Serialize;
 
 use crate::ext::AnonymousType;
 use crate::location::SourceLocation;
-use crate::type_info::TypeProperties;
+use crate::type_info::{TypeProperties, is_array_kind, is_function_pointer, is_primitive_kind};
 
 /* ────────────────────────────────── Types ───────────────────────────────── */
 
@@ -335,22 +335,23 @@ fn clean_type_name(ty: &Type<'_>) -> String {
 }
 
 /// Classify the terminal type of a typedef chain.
+///
+/// Delegates kind-set membership to the shared helpers in
+/// [`crate::type_info`] (`is_primitive_kind`, `is_array_kind`,
+/// `is_function_pointer`) so the lists of primitive/array `TypeKind`
+/// variants live in exactly one place — no inlined repetition.
 fn classify(ty: &Type<'_>) -> TypedefKind {
     let canonical = ty.get_canonical_type();
-    let kind = canonical.get_kind();
 
     // Function pointer detection requires looking through the pointee.
-    if let Some(pointee) = canonical.get_pointee_type() {
-        if matches!(
-            pointee.get_canonical_type().get_kind(),
-            TypeKind::FunctionPrototype | TypeKind::FunctionNoPrototype
-        ) {
+    if canonical.get_pointee_type().is_some() {
+        if is_function_pointer(&canonical) {
             return TypedefKind::FunctionPointer;
         }
         return TypedefKind::Pointer;
     }
 
-    match kind {
+    match canonical.get_kind() {
         TypeKind::Record => match canonical
             .get_declaration()
             .map(|d| d.get_kind())
@@ -361,34 +362,8 @@ fn classify(ty: &Type<'_>) -> TypedefKind {
             _ => TypedefKind::Struct,
         },
         TypeKind::Enum => TypedefKind::Enum,
-        TypeKind::ConstantArray | TypeKind::IncompleteArray | TypeKind::VariableArray => {
-            TypedefKind::Array
-        }
-        TypeKind::Void
-        | TypeKind::Bool
-        | TypeKind::CharS
-        | TypeKind::CharU
-        | TypeKind::SChar
-        | TypeKind::UChar
-        | TypeKind::WChar
-        | TypeKind::Char16
-        | TypeKind::Char32
-        | TypeKind::Short
-        | TypeKind::UShort
-        | TypeKind::Int
-        | TypeKind::UInt
-        | TypeKind::Long
-        | TypeKind::ULong
-        | TypeKind::LongLong
-        | TypeKind::ULongLong
-        | TypeKind::Int128
-        | TypeKind::UInt128
-        | TypeKind::Half
-        | TypeKind::Float
-        | TypeKind::Double
-        | TypeKind::LongDouble
-        | TypeKind::Float128
-        | TypeKind::Nullptr => TypedefKind::Primitive,
+        x if is_array_kind(x) => TypedefKind::Array,
+        x if is_primitive_kind(x) => TypedefKind::Primitive,
         _ => TypedefKind::Other,
     }
 }

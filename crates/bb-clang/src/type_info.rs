@@ -74,10 +74,7 @@ impl TypeProperties {
         let is_pointer = canonical.get_pointee_type().is_some();
         let pointer_depth = count_pointer_depth(&canonical);
         let is_function_pointer = is_func_ptr(&canonical);
-        let is_array = matches!(
-            canonical.get_kind(),
-            TypeKind::ConstantArray | TypeKind::IncompleteArray | TypeKind::VariableArray
-        );
+        let is_array = is_array_kind(canonical.get_kind());
         let array_size = if is_array { canonical.get_size() } else { None };
 
         // Old semantics — useful for "what struct does this pointer
@@ -234,9 +231,17 @@ fn terminal_primitive_name(canonical: &Type<'_>) -> Option<String> {
     }
 }
 
-/// Whether a [`TypeKind`] is a builtin scalar (suitable for the
-/// `underlying_type` primitive slot).
-const fn is_primitive_kind(k: TypeKind) -> bool {
+/// Whether a [`TypeKind`] is a builtin scalar — single source of truth
+/// for "what counts as a primitive" across the crate.
+///
+/// Used by `TypeProperties::from_type` to decide whether the terminal
+/// leaf of a canonical chain qualifies for the `underlying_type` slot,
+/// and by [`crate::typedef::TypedefIndex`] to classify a typedef whose
+/// canonical type is one of these. Centralising it here means future
+/// additions (new clang `TypeKind`s, exotic scalars) only need to
+/// change one place.
+#[must_use]
+pub(crate) const fn is_primitive_kind(k: TypeKind) -> bool {
     matches!(
         k,
         TypeKind::Void
@@ -265,6 +270,26 @@ const fn is_primitive_kind(k: TypeKind) -> bool {
             | TypeKind::Float128
             | TypeKind::Nullptr
     )
+}
+
+/// Whether a [`TypeKind`] is one of the three array flavors clang
+/// surfaces. Same centralisation rationale as [`is_primitive_kind`].
+#[must_use]
+pub(crate) const fn is_array_kind(k: TypeKind) -> bool {
+    matches!(
+        k,
+        TypeKind::ConstantArray | TypeKind::IncompleteArray | TypeKind::VariableArray
+    )
+}
+
+/// Whether a [`Type`] is a function pointer (pointer-to-function).
+///
+/// Walks one pointee level — `int (*)(...)` is a pointer; the pointee
+/// is the function prototype itself. Exposed at crate scope so the
+/// typedef classifier can call it without re-implementing the dance.
+#[must_use]
+pub(crate) fn is_function_pointer(ty: &Type<'_>) -> bool {
+    is_func_ptr(&ty.get_canonical_type())
 }
 
 /// Serde helper: skip serializing when value is zero.
