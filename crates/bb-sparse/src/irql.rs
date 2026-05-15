@@ -60,13 +60,34 @@ impl IrqlConstraint {
     }
 
     /// Does this constraint match a filter applied at `filter.level` with
-    /// `filter.op`? Symbolic-match cases short-circuit; otherwise both
-    /// sides are resolved to numeric values via `lookup` and compared
-    /// using `filter.op` (or `=` when `op` is `None`).
+    /// `filter.op`?
     ///
-    /// Returns `None` when a side can't be resolved numerically and the
-    /// comparison is therefore undefined (the caller decides whether to
-    /// keep or drop the entry).
+    /// Each side describes a **range** of IRQLs at which the function is
+    /// callable, not a single point:
+    ///
+    /// - bare `X` / `= X` / `== X` → `[X, X]` (callable only at X)
+    /// - `<= X` → `[0, X]`     (callable at any IRQL up to and including X)
+    /// - `<  X` → `[0, X-1]`
+    /// - `>= X` → `[X, HIGH]`
+    /// - `>  X` → `[X+1, HIGH]`
+    ///
+    /// The filter is interpreted as a constraint on the function's range:
+    ///
+    /// - filter `= Y`  → the function's range covers Y (`min ≤ Y ≤ max`)
+    /// - filter `<= Y` → the function is callable **only** at IRQL ≤ Y (`max ≤ Y`)
+    /// - filter `<  Y` → `max < Y`
+    /// - filter `>= Y` → the function is callable **only** at IRQL ≥ Y (`min ≥ Y`)
+    /// - filter `>  Y` → `min > Y`
+    ///
+    /// This is the semantics behind issue #23: a function documented
+    /// `<= DISPATCH_LEVEL` is callable at PASSIVE through DISPATCH, so a
+    /// filter of `> PASSIVE_LEVEL` (i.e. "callable only above PASSIVE")
+    /// must NOT match it.
+    ///
+    /// Returns `None` when a side can't be resolved numerically (e.g.
+    /// `DEVICE_LEVEL` or `DIRQL` have no single concrete value) — the
+    /// caller decides whether to keep or drop the entry. Pure symbolic
+    /// matches short-circuit so symbolic-only constraints still work.
     #[must_use]
     pub fn matches(&self, filter: &Self, lookup: &HashMap<String, u64>) -> Option<bool> {
         // `ANY` filter matches everything.
@@ -74,21 +95,44 @@ impl IrqlConstraint {
             return Some(true);
         }
         // Exact symbolic equality covers same-level same-op cases (incl.
-        // both ops being None).
+        // both ops being None). Keeps DIRQL / DEVICE_LEVEL constraints
+        // workable for exact-string filters.
         if self.level == filter.level && self.op == filter.op {
             return Some(true);
         }
 
-        let a = self.resolve_level(lookup)?;
-        let b = filter.resolve_level(lookup)?;
+        let (fn_min, fn_max) = self.as_range(lookup)?;
+        let y = filter.resolve_level(lookup)?;
         let op = filter.op.as_deref().unwrap_or("=");
         Some(match op {
-            "=" | "==" => a == b,
-            "<" => a < b,
-            "<=" => a <= b,
-            ">" => a > b,
-            ">=" => a >= b,
+            "=" | "==" => fn_min <= y && y <= fn_max,
+            "<" => fn_max < y,
+            "<=" => fn_max <= y,
+            ">" => fn_min > y,
+            ">=" => fn_min >= y,
             _ => false,
+        })
+    }
+
+    /// Resolve this constraint to a `[min, max]` numeric IRQL range
+    /// according to its operator. See [`matches`](Self::matches) for the
+    /// mapping. Returns `None` when the level can't be resolved (e.g.
+    /// `DIRQL`).
+    ///
+    /// `HIGH_LEVEL` is used as the canonical upper bound; we don't
+    /// special-case wraparound (operators in practice anchor at named
+    /// levels, never at `HIGH_LEVEL + 1`).
+    fn as_range(&self, lookup: &HashMap<String, u64>) -> Option<(u64, u64)> {
+        let lvl = self.resolve_level(lookup)?;
+        let high = lookup.get("HIGH_LEVEL").copied().unwrap_or(31);
+        let op = self.op.as_deref().unwrap_or("=");
+        Some(match op {
+            "=" | "==" => (lvl, lvl),
+            "<=" => (0, lvl),
+            "<" => (0, lvl.saturating_sub(1)),
+            ">=" => (lvl, high),
+            ">" => (lvl.saturating_add(1).min(high), high),
+            _ => (lvl, lvl),
         })
     }
 }
@@ -271,5 +315,148 @@ mod tests {
         };
         assert_eq!(dirql.matches(&filter, &lookup()), None);
         assert_eq!(device.matches(&filter, &lookup()), None);
+    }
+
+    /* ──────── Range semantics (issue #23 regressions) ──────── */
+
+    /// `<= DISPATCH_LEVEL` covers PASSIVE..=DISPATCH (range [0, 2]).
+    /// A filter of `> PASSIVE_LEVEL` asks for functions whose MIN is > 0.
+    /// Since this function's min is 0, it must NOT match.
+    /// This is the issue #23 repro: bb-funcs returned `RtlInitUTF8StringEx`
+    /// (`<= DISPATCH_LEVEL`) for `> PASSIVE_LEVEL`.
+    #[test]
+    fn range_le_dispatch_does_not_match_gt_passive() {
+        let func = IrqlConstraint {
+            level: "DISPATCH_LEVEL".into(),
+            op: Some("<=".into()),
+        };
+        let filter = parse_constraint("> PASSIVE_LEVEL").unwrap();
+        assert_eq!(func.matches(&filter, &lookup()), Some(false));
+    }
+
+    /// `>= DISPATCH_LEVEL` covers DISPATCH..=HIGH (range [2, 31]).
+    /// A filter of `> PASSIVE_LEVEL` asks min > 0. Min is 2, so MATCH.
+    #[test]
+    fn range_ge_dispatch_matches_gt_passive() {
+        let func = IrqlConstraint {
+            level: "DISPATCH_LEVEL".into(),
+            op: Some(">=".into()),
+        };
+        let filter = parse_constraint("> PASSIVE_LEVEL").unwrap();
+        assert_eq!(func.matches(&filter, &lookup()), Some(true));
+    }
+
+    /// A bare-level constraint represents a single-point range.
+    /// `DISPATCH_LEVEL` (range [2, 2]) matches `> PASSIVE_LEVEL` (min 2 > 0).
+    #[test]
+    fn range_bare_dispatch_matches_gt_passive() {
+        let func = IrqlConstraint {
+            level: "DISPATCH_LEVEL".into(),
+            op: None,
+        };
+        let filter = parse_constraint("> PASSIVE_LEVEL").unwrap();
+        assert_eq!(func.matches(&filter, &lookup()), Some(true));
+    }
+
+    /// Filter `= DISPATCH_LEVEL` asks: does the function's range cover
+    /// DISPATCH_LEVEL? `<= DISPATCH_LEVEL` (range [0, 2]) covers 2, so MATCH.
+    #[test]
+    fn range_eq_filter_checks_coverage() {
+        let func_le = IrqlConstraint {
+            level: "DISPATCH_LEVEL".into(),
+            op: Some("<=".into()),
+        };
+        let filter = parse_constraint("= DISPATCH_LEVEL").unwrap();
+        assert_eq!(func_le.matches(&filter, &lookup()), Some(true));
+
+        // PASSIVE_LEVEL (range [0, 0]) does NOT cover DISPATCH_LEVEL (2).
+        let func_passive = IrqlConstraint {
+            level: "PASSIVE_LEVEL".into(),
+            op: None,
+        };
+        assert_eq!(func_passive.matches(&filter, &lookup()), Some(false));
+    }
+
+    /// Filter `<= DISPATCH_LEVEL` asks: is the function's max ≤ 2?
+    /// `>= APC_LEVEL` (range [1, 31]) has max 31 → NO MATCH.
+    #[test]
+    fn range_le_filter_rejects_wider_max() {
+        let func = IrqlConstraint {
+            level: "APC_LEVEL".into(),
+            op: Some(">=".into()),
+        };
+        let filter = parse_constraint("<= DISPATCH_LEVEL").unwrap();
+        assert_eq!(func.matches(&filter, &lookup()), Some(false));
+    }
+
+    /// Filter `>= APC_LEVEL` asks: is the function's min ≥ 1?
+    /// `<= DISPATCH_LEVEL` (range [0, 2]) has min 0 → NO MATCH.
+    /// This is the same family of bug as the `>` case in #23.
+    #[test]
+    fn range_ge_filter_rejects_lower_min() {
+        let func = IrqlConstraint {
+            level: "DISPATCH_LEVEL".into(),
+            op: Some("<=".into()),
+        };
+        let filter = parse_constraint(">= APC_LEVEL").unwrap();
+        assert_eq!(func.matches(&filter, &lookup()), Some(false));
+    }
+
+    /// A bare-level filter (`--irql APC_LEVEL`) is the same as
+    /// `--irql "= APC_LEVEL"`: keep functions whose callable range
+    /// covers APC_LEVEL.
+    #[test]
+    fn bare_filter_is_equivalent_to_eq() {
+        let bare = IrqlConstraint {
+            level: "APC_LEVEL".into(),
+            op: None,
+        };
+        let eq = IrqlConstraint {
+            level: "APC_LEVEL".into(),
+            op: Some("=".into()),
+        };
+
+        // <= DISPATCH_LEVEL covers APC_LEVEL — match under both filter forms.
+        let le_dispatch = IrqlConstraint {
+            level: "DISPATCH_LEVEL".into(),
+            op: Some("<=".into()),
+        };
+        assert_eq!(le_dispatch.matches(&bare, &lookup()), Some(true));
+        assert_eq!(le_dispatch.matches(&eq, &lookup()), Some(true));
+
+        // Bare PASSIVE_LEVEL does NOT cover APC_LEVEL — no match under either.
+        let bare_passive = IrqlConstraint {
+            level: "PASSIVE_LEVEL".into(),
+            op: None,
+        };
+        assert_eq!(bare_passive.matches(&bare, &lookup()), Some(false));
+        assert_eq!(bare_passive.matches(&eq, &lookup()), Some(false));
+
+        // Bare APC_LEVEL exactly matches the bare filter (symbolic shortcut)
+        // and also matches the `= APC_LEVEL` filter via coverage.
+        let bare_apc = IrqlConstraint {
+            level: "APC_LEVEL".into(),
+            op: None,
+        };
+        assert_eq!(bare_apc.matches(&bare, &lookup()), Some(true));
+        assert_eq!(bare_apc.matches(&eq, &lookup()), Some(true));
+    }
+
+    /// Strict-less filter `< APC_LEVEL` asks: is the function's max < 1?
+    /// Bare `PASSIVE_LEVEL` (range [0, 0]) has max 0 → MATCH.
+    /// `<= DISPATCH_LEVEL` (range [0, 2]) has max 2 → NO MATCH.
+    #[test]
+    fn range_lt_filter_max_strictly_below() {
+        let passive = IrqlConstraint {
+            level: "PASSIVE_LEVEL".into(),
+            op: None,
+        };
+        let le_dispatch = IrqlConstraint {
+            level: "DISPATCH_LEVEL".into(),
+            op: Some("<=".into()),
+        };
+        let filter = parse_constraint("< APC_LEVEL").unwrap();
+        assert_eq!(passive.matches(&filter, &lookup()), Some(true));
+        assert_eq!(le_dispatch.matches(&filter, &lookup()), Some(false));
     }
 }

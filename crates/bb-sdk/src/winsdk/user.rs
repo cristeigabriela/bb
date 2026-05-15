@@ -10,6 +10,14 @@ pub(super) const GUARDED_DEFINES: &[(&str, &str)] = &[
     ("WINAPI_FAMILY", "WINAPI_FAMILY_DESKTOP_APP"),
 ];
 
+/// Raw (unguarded) defines for user-mode.
+///
+/// `WIN32_NO_STATUS` tells `winnt.h` to skip its small inline subset of
+/// `STATUS_*` macros so the full set can come from `ntstatus.h` without
+/// redefinition errors. The synthetic header's coda undefines this
+/// after the windows.h chain has been processed (see [`super::sdk_header`]).
+pub(super) const RAW_DEFINES: &[(&str, &str)] = &[("WIN32_NO_STATUS", "")];
+
 /// Grouped `#include` sections for user-mode.
 ///
 /// `winsock2.h` / `ws2tcpip.h` must come **before** `windows.h` — the

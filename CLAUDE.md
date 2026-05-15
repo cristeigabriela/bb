@@ -72,6 +72,77 @@ The `bb-sparse` build.rs auto-generates MSDN metadata from the sparse submodule 
 | `BB_PHNT_HEADER` | Use a custom phnt.h instead of generating from submodule |
 | `BB_SPARSE_SDK_JSON` | Use a pre-generated `sdk-api.json` instead of running sparse in SDK mode (alias: `BB_SPARSE_JSON`) |
 | `BB_SPARSE_DRIVER_JSON` | Use a pre-generated `driver-docs.json` instead of running sparse in driver mode |
+| `BB_NO_CACHE` | Bypass the on-disk AST cache (parse from headers every time) |
+
+### AST cache
+
+First runs of `bb-funcs` / `bb-types` / `bb-consts` save the parsed translation
+unit via `clang_saveTranslationUnit` under `%LOCALAPPDATA%\bb\ast\<sha256>.ast`.
+The cache key hashes the synthetic header content, every clang arg, and the
+bb-sdk crate version — any change to header config, SDK install, target arch,
+or a bb-sdk release invalidates automatically. Subsequent runs with the same
+SDK / arch / mode load the saved AST and skip libclang's full re-parse.
+Saved ASTs are ~80 MB each; clear `bb/ast/` to nuke them, or set
+`BB_NO_CACHE=1` per-invocation. The README has timing tables.
+
+### Parse hygiene: zero diagnostics — **MANDATORY**
+
+> **This is non-negotiable.** Any change that touches `crates/bb-sdk/`,
+> `crates/bb-clang/`, header inclusion order, preprocessor defines, or
+> the PHNT submodule **MUST** be validated against `--diagnostics` and
+> **MUST NOT** introduce any new clang `error:` or `warning:` lines.
+> Catching these is the single most important step before merging.
+
+`bb` parses the full Windows SDK + WDK + PHNT chain **without libclang
+errors or warnings** under every mode combination (`--mode user`,
+`--mode kernel`, `--phnt`, `--phnt --mode kernel`). The README publicly
+advertises this (search for "zero libclang errors and zero warnings"
+in README.md). Breaking the contract — even silently, with a single
+new warning — is a regression that must be fixed before the PR lands.
+
+**Required check before every header-touching change:**
+
+```powershell
+$env:PATH = "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64;$env:PATH"
+
+# Use a match-something name so bb's own "no constants matching" error
+# message doesn't show up in the output and pollute the grep. Any line
+# clang emits will follow the `<path>:<line>:<col>: error|warning:`
+# format — filter for that and the count MUST be zero.
+foreach ($combo in @(
+    @('user','--winsdk'), @('kernel','--winsdk'),
+    @('user','--phnt'),   @('kernel','--phnt')
+)) {
+    $mode = $combo[0]; $sdk = $combo[1]
+    $log = "$env:TEMP\bb-diag-$mode-$($sdk -replace '--','').txt"
+    & .\target\release\bb-consts.exe $sdk --mode $mode --diagnostics --name STATUS_SUCCESS *> $log
+    $errs  = (Select-String -Path $log -Pattern ': error:'   | Measure-Object).Count
+    $warns = (Select-String -Path $log -Pattern ': warning:' | Measure-Object).Count
+    Write-Host ("{0,-7} {1,-8} -> clang errors={2}  warnings={3}" -f $mode, $sdk, $errs, $warns)
+}
+```
+
+Any non-zero clang `error:` or `warning:` count is a regression.
+When one appears:
+
+- Prefer to **fix the root cause**: missing `-D`, wrong inclusion order,
+  a guarded define that needs to land before a specific header, etc.
+- Only as a last resort, exclude the offending header explicitly in
+  `crates/bb-sdk/src/winsdk/{user,kernel}.rs` with an inline rationale
+  comment matching the format of the existing exclusions (see the
+  "Excluded (with rationale)" section in README.md). Document **why**
+  it had to be dropped, not just that it was.
+
+Why this matters operationally: on `error:` clang performs partial
+recovery and emits **phantom entities** into the AST. Those flow
+straight into `--json` / `--sqlite` exports and into bb-viewer, where
+they look real to downstream consumers. Warnings often signal silent
+redefinitions that change a struct's layout or a macro's value without
+anyone noticing — those bugs are nearly impossible to track down later.
+
+Silent regressions (a header chain that started warning after an
+unrelated refactor) are the worst case. Treat any new `warning:` line
+with the same urgency as a build error.
 
 ## Running tests
 
@@ -122,6 +193,7 @@ Tests use `serial_test` because libclang is not fully thread-safe. Integration t
 - **bb-funcs `where_filter` module** evaluates SQL WHERE clauses via `bb-sql::Evaluator`.
 - **`bb_cli::terminal_width()`** is the shared terminal width helper used by all CLIs.
 - **`bb-sql`** provides a generic `Evaluator<T>` with a column resolver closure, plus `export_json_to_sqlite` for serde-based SQLite export. All CLIs support `--sqlite`.
+- **Synthetic header coda**: `build_header` in `bb-sdk/src/winsdk/mod.rs` accepts a trailing raw-text `coda` parameter for preprocessor scaffolding that doesn't fit the group abstraction. Currently used for the `WIN32_NO_STATUS` dance: define it in `user::RAW_DEFINES` so `winnt.h` skips its small inline STATUS_* subset, then in the coda `#undef WIN32_NO_STATUS` + `#include <ntstatus.h>` to emit the full set. Kernel mode also gets a direct `ntstatus.h` include in its coda so STATUS codes flow even when the WDK (and thus `km/ntifs.h`) isn't installed — `ntstatus.h` lives in `shared/` which the plain SDK always ships.
 
 ## File naming in bb-clang
 
