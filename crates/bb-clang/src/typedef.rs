@@ -31,6 +31,7 @@ use serde::Serialize;
 
 use crate::ext::AnonymousType;
 use crate::location::SourceLocation;
+use crate::type_info::TypeProperties;
 
 /* ────────────────────────────────── Types ───────────────────────────────── */
 
@@ -59,17 +60,25 @@ pub enum TypedefKind {
     Other,
 }
 
-/// A single typedef entry: name + chain + canonical resolution + classification.
+/// A single typedef entry: name + chain + canonical resolution +
+/// full type metadata (flattened from [`TypeProperties`]).
 ///
-/// Serializes to a flat JSON object suitable for inclusion in the
-/// `typedefs` array of `bb-types` output. All names use the human-readable
-/// form (matches `Type::get_display_name`).
+/// Serializes to a flat JSON object whose shape is identical to what
+/// fields and params expose for their own types — programmers get the
+/// same vocabulary (`is_pointer`, `pointer_depth`, `is_function_pointer`,
+/// `underlying_type` for the terminal primitive, `underlying_record` for
+/// the pointee record name, etc.) regardless of which entity they're
+/// looking at. That's the contract that lets a generic `inspect_type`
+/// helper accept any of these without branching.
 #[derive(Debug, Clone, Serialize)]
 pub struct Typedef {
     /// Typedef name as declared (e.g. `"LARGE_INTEGER"`, `"HANDLE"`).
     pub name: String,
 
-    /// Classification of the final canonical type.
+    /// Categorical classification of the final canonical type. Programmers
+    /// can switch on this rather than parsing the booleans below; the
+    /// booleans give the full picture (`Pointer` vs `FunctionPointer` is
+    /// distinguishable from `is_function_pointer`, for example).
     pub kind: TypedefKind,
 
     /// Immediate next link in the alias chain — what `typedef X Y;` was
@@ -83,10 +92,12 @@ pub struct Typedef {
     pub canonical: String,
 
     /// Canonical declaration name when the chain ends at a named
-    /// `struct`/`union`/`enum`/`class` declaration. `None` for pointer,
-    /// primitive, or anonymous-record typedefs.
+    /// `struct`/`union`/`enum`/`class` declaration **directly** (no
+    /// intervening pointer or array). `None` for pointer typedefs even
+    /// when they point at a named record — use the flattened
+    /// `underlying_record` for that case.
     ///
-    /// This is the field used to attach `aliases` back to a [`Struct`].
+    /// Used to attach `aliases` back to a [`Struct`](crate::Struct).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub canonical_decl_name: Option<String>,
 
@@ -94,6 +105,15 @@ pub struct Typedef {
     /// For `HANDLE`, this is `["PVOID", "void *"]`. For a single-step
     /// typedef like `LARGE_INTEGER`, this is `["_LARGE_INTEGER"]`.
     pub chain: Vec<String>,
+
+    /// Full type metadata, flattened into this object's JSON output so
+    /// the shape matches `Field` and `Param`. Contains qualifiers,
+    /// pointer/array classification, the terminal `underlying_type`
+    /// primitive (e.g. `"void"` for `HANDLE`), and the
+    /// `underlying_record` decl name (e.g. `"_LARGE_INTEGER"` for
+    /// `LARGE_INTEGER`).
+    #[serde(flatten)]
+    pub properties: TypeProperties,
 
     /// Source location of the `typedef` declaration, when available.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -219,7 +239,13 @@ impl TypedefIndex {
     /// type, or chains to something we can't represent.
     fn build_one(entity: &Entity<'_>) -> Option<Typedef> {
         let name = entity.get_name()?;
+        let entity_type = entity.get_type()?;
         let underlying = entity.get_typedef_underlying_type()?;
+
+        // Compute the full type metadata from the typedef's own clang
+        // type. This is what makes the JSON shape compatible with
+        // Field/Param — programmers see the same vocabulary everywhere.
+        let properties = TypeProperties::from_type(&entity_type);
 
         // First link in the chain: the *spelled* alias target, normalized
         // (`_LARGE_INTEGER` rather than `union _LARGE_INTEGER`, `PVOID`
@@ -284,6 +310,7 @@ impl TypedefIndex {
             canonical,
             canonical_decl_name,
             chain,
+            properties,
             location,
         })
     }

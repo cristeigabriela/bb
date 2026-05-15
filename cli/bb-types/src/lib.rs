@@ -73,6 +73,33 @@ pub fn find_typedef_hits<'i>(index: &'i TypedefIndex, filter: &StructFilter) -> 
     index.match_pattern(pattern, filter.case_sensitive)
 }
 
+/// Find a single struct/union/class declaration by its exact canonical
+/// name. Used to auto-expand pointer-typedef targets — when a search
+/// surfaces `LPSECURITY_ATTRIBUTES`, we use this to also pull in the
+/// `_SECURITY_ATTRIBUTES` struct it points to.
+///
+/// Returns `None` if no declaration matches (e.g. the typedef points to
+/// an opaque struct never defined in the TU).
+#[must_use]
+pub fn find_struct_by_name<'a>(
+    tu: &'a TranslationUnit<'a>,
+    name: &str,
+    index: Option<&TypedefIndex>,
+) -> Option<Struct<'a>> {
+    iter_structs(tu)
+        .filter(|e| e.get_name().as_deref() == Some(name))
+        .filter_map(|e| Struct::try_from(e).ok())
+        .map(|s| {
+            if let Some(idx) = index {
+                let aliases = idx.aliases_for(s.get_name()).to_vec();
+                s.with_aliases(aliases)
+            } else {
+                s
+            }
+        })
+        .next()
+}
+
 /* ────────────────────────────────── Match ───────────────────────────────── */
 
 pub struct StructFilter {

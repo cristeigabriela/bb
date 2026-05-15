@@ -34,7 +34,7 @@ pub use json::{ToJson, build_referred_components, collect_component_constants};
 pub use location::{SourceLocation, entity_in_header};
 pub use struct_::Field;
 pub use struct_::Struct;
-pub use type_info::TypeInfo;
+pub use type_info::{TypeInfo, TypeProperties};
 pub use typedef::{Typedef, TypedefIndex, TypedefKind};
 
 // Re-export commonly used clang types for convenience

@@ -174,7 +174,7 @@ fn render_row(row: &Row, typedef_index: &TypedefIndex) -> Line<'static> {
                 // Dim `(canonical)` annotation for typedef'd field types
                 // — same logic as the CLI renderer, so HANDLE shows
                 // `(void *)`, LARGE_INTEGER shows `(_LARGE_INTEGER)`, etc.
-                let underlying = field.get_type_info().underlying_type.as_deref();
+                let underlying = field.get_type_info().underlying_record.as_deref();
                 if let Some(canon) = bb_clang::display::typedef_annotation(
                     ty,
                     underlying,

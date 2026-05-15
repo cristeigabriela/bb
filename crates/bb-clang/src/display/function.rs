@@ -119,7 +119,7 @@ pub fn format_abi_param(i: usize, p: &Param, typedef_index: Option<&TypedefIndex
     let loc_str = format_location(p.get_abi_location()).yellow();
     let raw_type = p.get_type_name();
     let type_styled = raw_type.cyan();
-    let underlying = p.get_type_info().underlying_type.as_deref();
+    let underlying = p.get_type_info().underlying_record.as_deref();
     let type_cell = match typedef_annotation(raw_type, underlying, typedef_index) {
         Some(canon) => format!("{type_styled} {}", format!("({canon})").dimmed()),
         None => type_styled.to_string(),

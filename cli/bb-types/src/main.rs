@@ -4,7 +4,9 @@ use anyhow::Result;
 use bb_clang::{Struct, ToJson, Typedef, TypedefIndex};
 use bb_cli::{current_command_string, get_header_config, print_suggestions};
 use bb_sql::export_json_to_sqlite;
-use bb_types_lib::{StructFilter, collect_structs, find_typedef_hits, iter_structs};
+use bb_types_lib::{
+    StructFilter, collect_structs, find_struct_by_name, find_typedef_hits, iter_structs,
+};
 use clang::{Clang, Index};
 use clap::Parser;
 use colored::Colorize;
@@ -86,7 +88,40 @@ fn main() -> Result<()> {
         header_filter: args.filter.clone(),
         case_sensitive: args.case_sensitive,
     };
-    let structs = collect_structs(&tu, &filter, Some(&typedef_index));
+    let mut structs = collect_structs(&tu, &filter, Some(&typedef_index));
+
+    // Auto-expand pointer-typedef targets: when the user searches a
+    // pointer typedef like `LPSECURITY_ATTRIBUTES`, also pull in the
+    // `_SECURITY_ATTRIBUTES` struct it points to. Saves consumers from
+    // having to do a second lookup, and makes text rendering useful
+    // ("show me the layout of what this points at").
+    {
+        let initial_typedef_pattern_hits = find_typedef_hits(&typedef_index, &filter);
+        let already: std::collections::HashSet<String> =
+            structs.iter().map(|s| s.get_name().to_string()).collect();
+        let mut to_pull: Vec<String> = Vec::new();
+        let mut seen_pull: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for td in &initial_typedef_pattern_hits {
+            // Prefer canonical_decl_name (direct record alias) over
+            // properties.underlying_record (pointer-to-record), but
+            // expand for either.
+            let candidate = td
+                .canonical_decl_name
+                .as_deref()
+                .or(td.properties.underlying_record.as_deref());
+            if let Some(record_name) = candidate
+                && !already.contains(record_name)
+                && seen_pull.insert(record_name.to_string())
+            {
+                to_pull.push(record_name.to_string());
+            }
+        }
+        for record_name in to_pull {
+            if let Some(s) = find_struct_by_name(&tu, &record_name, Some(&typedef_index)) {
+                structs.push(s);
+            }
+        }
+    }
 
     // Resolve every typedef the user could reasonably want surfaced:
     //

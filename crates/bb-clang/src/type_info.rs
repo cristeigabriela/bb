@@ -1,36 +1,41 @@
 //! Shared type metadata extracted from a [`clang::Type`].
 //!
 //! [`TypeInfo`] is the single source of truth for type classification
-//! (pointer, array, const, underlying type) used by both [`Field`](crate::Field)
-//! and [`Param`](crate::Param).
+//! (pointer, array, const, terminal primitive, underlying record) used by
+//! [`Field`](crate::Field), [`Param`](crate::Param), and
+//! [`Typedef`](crate::Typedef). The data-only subset is exposed as
+//! [`TypeProperties`], which can be embedded and serialized into any
+//! type-shaped JSON object via `#[serde(flatten)]` — that's how all three
+//! parent types stay shape-compatible for API consumers.
 
 use clang::{Type, TypeKind};
 use serde::Serialize;
 
 use crate::ext::UnderlyingType;
 
-/* ────────────────────────────────── Type ────────────────────────────────── */
+/* ────────────────────────────────── Types ───────────────────────────────── */
 
-/// Extracted type metadata from a [`clang::Type`].
+/// Serializable type metadata. Carries the same information for any type
+/// in any context — fields, params, typedefs — so API consumers always
+/// see the same shape.
 ///
-/// Holds both the raw clang type (for further introspection) and the
-/// serializable properties that describe the type's nature.
-#[derive(Debug, Serialize)]
+/// All boolean flags describe the type *with qualifiers and pointers*,
+/// not the canonical leaf. `underlying_type` is the **terminal primitive**
+/// at the bottom of the canonical chain (e.g. `void`, `int`, `char`).
+/// `underlying_record` is the **record/enum declaration name** after
+/// stripping one level of pointer/array indirection (e.g. for
+/// `LIST_ENTRY *`, this is `_LIST_ENTRY`). The two are mutually exclusive
+/// in practice: pointer/primitive typedefs set the former, record
+/// typedefs the latter.
+#[derive(Debug, Clone, Default, Serialize)]
 #[allow(clippy::struct_excessive_bools)] // Each bool represents a distinct type property.
-pub struct TypeInfo<'a> {
-    /// The raw clang type. Available for further introspection but
-    /// skipped during serialization.
-    #[serde(skip)]
-    type_: Type<'a>,
-    /// The resolved underlying type name after stripping pointers and arrays.
-    /// Only present when it differs from the display name.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub underlying_type: Option<String>,
+pub struct TypeProperties {
     pub is_const: bool,
     pub is_volatile: bool,
     pub is_restrict: bool,
     pub is_pointer: bool,
-    /// How many levels of pointer indirection (e.g. `PVOID**` = 2, `HANDLE` = 1 if ptr typedef, plain `DWORD` = 0).
+    /// How many levels of pointer indirection (e.g. `PVOID**` = 2,
+    /// `HANDLE` = 1, plain `DWORD` = 0).
     #[serde(skip_serializing_if = "is_zero")]
     pub pointer_depth: usize,
     pub is_function_pointer: bool,
@@ -38,19 +43,104 @@ pub struct TypeInfo<'a> {
     /// The number of elements in a fixed-size array, if applicable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub array_size: Option<usize>,
+    /// Terminal primitive at the bottom of the canonical chain.
+    /// e.g. `void`, `int`, `char`, `unsigned long`, `bool`. `None` when
+    /// the chain bottoms at a record (struct/union/enum) — consult
+    /// `underlying_record` for that case.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub underlying_type: Option<String>,
+    /// Record/enum declaration name after stripping one level of pointer
+    /// or array indirection. e.g. for `LIST_ENTRY *`, this is
+    /// `_LIST_ENTRY`. `None` when there's no named record at the bottom
+    /// of the chain (the type bottoms at a primitive or anonymous).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub underlying_record: Option<String>,
+}
+
+impl TypeProperties {
+    /// Compute properties from a clang [`Type`].
+    ///
+    /// Walks the canonical form to determine pointer/array/function-pointer
+    /// classification, then walks **all** the way down (through every
+    /// pointer/array layer) to find the terminal primitive when there is
+    /// one. The first-step pointee is consulted separately for the
+    /// `underlying_record` field.
+    #[must_use]
+    pub fn from_type(type_: &Type<'_>) -> Self {
+        let canonical = type_.get_canonical_type();
+        let is_const = type_.is_const_qualified();
+        let is_volatile = type_.is_volatile_qualified();
+        let is_restrict = type_.is_restrict_qualified();
+        let is_pointer = canonical.get_pointee_type().is_some();
+        let pointer_depth = count_pointer_depth(&canonical);
+        let is_function_pointer = is_func_ptr(&canonical);
+        let is_array = matches!(
+            canonical.get_kind(),
+            TypeKind::ConstantArray | TypeKind::IncompleteArray | TypeKind::VariableArray
+        );
+        let array_size = if is_array { canonical.get_size() } else { None };
+
+        // Old semantics — useful for "what struct does this pointer
+        // ultimately point at?". Strip one level of pointer/array.
+        let after_one_strip = type_.get_underlying_type();
+        let underlying_record = after_one_strip.get_declaration().and_then(|d| d.get_name());
+
+        // Walk all the way to the terminal scalar leaf. Returns None when
+        // the chain bottoms at a record (or anonymous / unhandled kind).
+        let underlying_type = terminal_primitive_name(&canonical);
+
+        Self {
+            is_const,
+            is_volatile,
+            is_restrict,
+            is_pointer,
+            pointer_depth,
+            is_function_pointer,
+            is_array,
+            array_size,
+            underlying_type,
+            underlying_record,
+        }
+    }
+
+    /// Clear `underlying_record` if it matches the given display name.
+    ///
+    /// Used by [`Field`](crate::Field) and [`Param`](crate::Param) to
+    /// avoid redundant output when the rendered type name already says
+    /// `_LIST_ENTRY` and the record name would just repeat that.
+    pub fn suppress_underlying_record_if_matches(&mut self, display_name: Option<&str>) {
+        if let Some(ref r) = self.underlying_record
+            && display_name.is_some_and(|d| d == r)
+        {
+            self.underlying_record = None;
+        }
+    }
+}
+
+/// Extracted type metadata from a [`clang::Type`], with the raw type
+/// preserved for further introspection.
+///
+/// Embeds [`TypeProperties`] via `#[serde(flatten)]` so the serialized
+/// shape is identical to that of [`Typedef`](crate::Typedef). Field /
+/// Param consumers and Typedef consumers see the same metadata vocabulary.
+#[derive(Debug, Serialize)]
+pub struct TypeInfo<'a> {
+    /// The raw clang type. Available for further introspection but
+    /// skipped during serialization.
+    #[serde(skip)]
+    type_: Type<'a>,
+    #[serde(flatten)]
+    pub properties: TypeProperties,
 }
 
 impl<'a> TypeInfo<'a> {
-    /// Clear `underlying_type` if it matches the given display name.
+    /// Clear `underlying_record` if it matches the given display name.
     ///
-    /// Used by [`Field`](crate::Field) and [`Param`](crate::Param) to avoid
-    /// redundant output when the underlying type is the same as the display type.
+    /// Delegates to [`TypeProperties::suppress_underlying_record_if_matches`].
+    /// Kept on `TypeInfo` for source-compatibility with prior callers.
     pub fn suppress_underlying_if_matches(&mut self, display_name: Option<&str>) {
-        if let Some(ref u) = self.underlying_type
-            && display_name.is_some_and(|d| d == u)
-        {
-            self.underlying_type = None;
-        }
+        self.properties
+            .suppress_underlying_record_if_matches(display_name);
     }
 
     /// The raw clang type.
@@ -72,43 +162,19 @@ impl<'a> TypeInfo<'a> {
     }
 }
 
+impl<'a> std::ops::Deref for TypeInfo<'a> {
+    type Target = TypeProperties;
+    fn deref(&self) -> &TypeProperties {
+        &self.properties
+    }
+}
+
 /* ─────────────────────────────── Conversions ────────────────────────────── */
 
 impl<'a> From<Type<'a>> for TypeInfo<'a> {
-    /// Extract type metadata from a clang type.
-    ///
-    /// The `underlying_type` field is always populated when a declaration
-    /// name is available. Use [`suppress_underlying_if_matches`](Self::suppress_underlying_if_matches)
-    /// to clear it when it matches the display name.
     fn from(type_: Type<'a>) -> Self {
-        let canonical = type_.get_canonical_type();
-        let is_const = type_.is_const_qualified();
-        let is_volatile = type_.is_volatile_qualified();
-        let is_restrict = type_.is_restrict_qualified();
-        let is_pointer = canonical.get_pointee_type().is_some();
-        let pointer_depth = count_pointer_depth(&canonical);
-        let is_function_pointer = is_func_ptr(&canonical);
-        let is_array = matches!(
-            canonical.get_kind(),
-            TypeKind::ConstantArray | TypeKind::IncompleteArray | TypeKind::VariableArray
-        );
-        let array_size = if is_array { canonical.get_size() } else { None };
-
-        let underlying = type_.get_underlying_type();
-        let underlying_type = underlying.get_declaration().and_then(|d| d.get_name());
-
-        Self {
-            type_,
-            underlying_type,
-            is_const,
-            is_volatile,
-            is_restrict,
-            is_pointer,
-            pointer_depth,
-            is_function_pointer,
-            is_array,
-            array_size,
-        }
+        let properties = TypeProperties::from_type(&type_);
+        Self { type_, properties }
     }
 }
 
@@ -138,6 +204,67 @@ fn is_func_ptr(canonical: &Type) -> bool {
             TypeKind::FunctionPrototype | TypeKind::FunctionNoPrototype
         )
     })
+}
+
+/// Walk every pointer / array / typedef layer and return the canonical
+/// display name of the terminal scalar if the leaf is a builtin.
+///
+/// Returns `None` when the leaf is a record/enum (use `underlying_record`
+/// instead) or a function type (use `is_function_pointer`).
+fn terminal_primitive_name(canonical: &Type<'_>) -> Option<String> {
+    let mut current = canonical.get_canonical_type();
+    let mut guard = 0_usize;
+    loop {
+        if let Some(pointee) = current.get_pointee_type() {
+            current = pointee.get_canonical_type();
+        } else if let Some(element) = current.get_element_type() {
+            current = element.get_canonical_type();
+        } else {
+            break;
+        }
+        guard += 1;
+        if guard > 64 {
+            return None;
+        }
+    }
+    if is_primitive_kind(current.get_kind()) {
+        Some(current.get_display_name())
+    } else {
+        None
+    }
+}
+
+/// Whether a [`TypeKind`] is a builtin scalar (suitable for the
+/// `underlying_type` primitive slot).
+const fn is_primitive_kind(k: TypeKind) -> bool {
+    matches!(
+        k,
+        TypeKind::Void
+            | TypeKind::Bool
+            | TypeKind::CharS
+            | TypeKind::CharU
+            | TypeKind::SChar
+            | TypeKind::UChar
+            | TypeKind::WChar
+            | TypeKind::Char16
+            | TypeKind::Char32
+            | TypeKind::Short
+            | TypeKind::UShort
+            | TypeKind::Int
+            | TypeKind::UInt
+            | TypeKind::Long
+            | TypeKind::ULong
+            | TypeKind::LongLong
+            | TypeKind::ULongLong
+            | TypeKind::Int128
+            | TypeKind::UInt128
+            | TypeKind::Half
+            | TypeKind::Float
+            | TypeKind::Double
+            | TypeKind::LongDouble
+            | TypeKind::Float128
+            | TypeKind::Nullptr
+    )
 }
 
 /// Serde helper: skip serializing when value is zero.

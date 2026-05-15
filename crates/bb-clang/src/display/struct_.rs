@@ -61,10 +61,17 @@ pub fn render_struct(
 /// Returns `None` when there is no annotation to render (type isn't a
 /// typedef, or canonical equals the displayed name). Centralized so the
 /// CLI, TUI, and function param renderers all use the same logic.
+///
+/// The fallback `underlying_record` arg is the record/enum decl name
+/// after stripping pointers/arrays (the "what struct is this?"
+/// answer) — kept as a fallback for when no [`TypedefIndex`] is supplied.
+/// The primitive `underlying_type` from [`TypeProperties`](crate::TypeProperties)
+/// isn't useful here because it loses pointer-ness (`HANDLE`'s primitive
+/// is `void`, but the user wants to see `void *`).
 #[must_use]
 pub fn typedef_annotation(
     type_name: &str,
-    underlying_type: Option<&str>,
+    underlying_record: Option<&str>,
     typedef_index: Option<&TypedefIndex>,
 ) -> Option<String> {
     // 1. Prefer the typedef index: works for any kind of typedef chain.
@@ -75,9 +82,9 @@ pub fn typedef_annotation(
         return Some(td.canonical.clone());
     }
 
-    // 2. Fall back to the per-field underlying type: struct/union/enum only,
-    //    but still useful when no index is wired through.
-    if let Some(u) = underlying_type
+    // 2. Fall back to the per-field underlying record: struct/union/enum
+    //    only, but still useful when no index is wired through.
+    if let Some(u) = underlying_record
         && u != type_name
     {
         return Some(u.to_string());
@@ -122,7 +129,7 @@ fn write_fields(
         };
 
         let type_cell = if let Some(name) = type_name {
-            let underlying = field.get_type_info().underlying_type.as_deref();
+            let underlying = field.get_type_info().underlying_record.as_deref();
             let annotation = typedef_annotation(name, underlying, typedef_index);
             match annotation {
                 Some(canon) => format!("{} {}", name.cyan(), format!("({canon})").dimmed()),

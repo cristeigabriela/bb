@@ -16,7 +16,9 @@ mod tests {
         FuncFilter, FuncSort, ParamCountFilter, collect_funcs, collect_funcs_filtered,
     };
     use bb_sdk::{HeaderConfig, SdkMode};
-    use bb_types_lib::{StructFilter, collect_structs, find_typedef_hits, iter_structs};
+    use bb_types_lib::{
+        StructFilter, collect_structs, find_struct_by_name, find_typedef_hits, iter_structs,
+    };
     use clang::{Clang, Index};
 
     /// Shorthand macro to get:
@@ -2338,6 +2340,174 @@ mod tests {
             case_sensitive: false,
         };
         assert!(find_typedef_hits(&idx, &filter).is_empty());
+        Ok(())
+    }
+
+    /// Field JSON now carries the **primitive** at the bottom of the
+    /// canonical chain in `underlying_type` (e.g. `BOOL` → `int`,
+    /// `DWORD` → `unsigned long`). This is the new
+    /// `TypeProperties.underlying_type` semantics.
+    #[test]
+    #[serial]
+    fn field_underlying_type_is_primitive() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let idx = TypedefIndex::build(&tu);
+        let filter = StructFilter {
+            name_pattern: Some("_SECURITY_ATTRIBUTES".into()),
+            header_filter: None,
+            case_sensitive: true,
+        };
+        let structs = collect_structs(&tu, &filter, Some(&idx));
+        let sa = find_struct(&structs, "_SECURITY_ATTRIBUTES")
+            .ok_or_else(|| anyhow::anyhow!("_SECURITY_ATTRIBUTES must exist"))?;
+
+        let j = sa.to_json();
+        let fields = j["fields"].as_array().expect("fields array");
+
+        let n_length = fields
+            .iter()
+            .find(|f| f["name"] == "nLength")
+            .expect("nLength field");
+        assert_eq!(
+            n_length["underlying_type"], "unsigned long",
+            "DWORD's primitive should be unsigned long"
+        );
+
+        let b_inherit = fields
+            .iter()
+            .find(|f| f["name"] == "bInheritHandle")
+            .expect("bInheritHandle field");
+        assert_eq!(
+            b_inherit["underlying_type"], "int",
+            "BOOL's primitive should be int"
+        );
+
+        Ok(())
+    }
+
+    /// Typedef JSON gains a flattened `TypeProperties` so the shape
+    /// matches Field/Param entries: `is_pointer`, `pointer_depth`,
+    /// `underlying_type` (primitive), `underlying_record` (record name),
+    /// etc. all appear at the top level.
+    #[test]
+    #[serial]
+    fn typedef_json_includes_flattened_type_properties() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let idx = TypedefIndex::build(&tu);
+        let handle = idx.lookup("HANDLE").expect("HANDLE must exist");
+        let j = serde_json::to_value(handle).expect("Typedef serializes");
+
+        // Pointer-typedef shape: is_pointer + underlying_type primitive,
+        // no underlying_record.
+        assert_eq!(j["is_pointer"], true);
+        assert_eq!(j["pointer_depth"], 1);
+        assert_eq!(j["underlying_type"], "void");
+        assert!(
+            j.get("underlying_record").is_none_or(serde_json::Value::is_null),
+            "HANDLE should not have underlying_record (void has no record name), got {:?}",
+            j["underlying_record"]
+        );
+        assert_eq!(j["is_const"], false);
+        assert_eq!(j["is_function_pointer"], false);
+
+        // Struct-typedef shape: inverse.
+        let li = idx.lookup("LARGE_INTEGER").expect("LARGE_INTEGER must exist");
+        let j2 = serde_json::to_value(li).expect("Typedef serializes");
+        assert_eq!(j2["is_pointer"], false);
+        assert_eq!(j2["underlying_record"], "_LARGE_INTEGER");
+        assert!(
+            j2.get("underlying_type").is_none_or(serde_json::Value::is_null),
+            "LARGE_INTEGER should not have a primitive underlying_type (leaf is a union), got {:?}",
+            j2["underlying_type"]
+        );
+
+        Ok(())
+    }
+
+    /// Auto-expansion: searching a pointer typedef like
+    /// `LPSECURITY_ATTRIBUTES` should let the caller pull in the
+    /// `_SECURITY_ATTRIBUTES` struct it points to, so the response is
+    /// self-contained. Mirrors the workflow `bb-types`'s main uses to
+    /// expand `types[]` from `typedefs[]`.
+    #[test]
+    #[serial]
+    fn pointer_typedef_search_expands_to_canonical_struct() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let idx = TypedefIndex::build(&tu);
+        let filter = StructFilter {
+            name_pattern: Some("LPSECURITY_ATTRIBUTES".into()),
+            header_filter: None,
+            case_sensitive: true,
+        };
+
+        // Initial struct search — pointer typedef name doesn't match any
+        // struct decl name, so this comes back empty.
+        let mut structs = collect_structs(&tu, &filter, Some(&idx));
+        assert!(
+            structs.is_empty(),
+            "no struct is literally named LPSECURITY_ATTRIBUTES"
+        );
+
+        // Typedef hits surface the pointer typedef directly.
+        let hits = find_typedef_hits(&idx, &filter);
+        let lp = hits
+            .iter()
+            .find(|t| t.name == "LPSECURITY_ATTRIBUTES")
+            .ok_or_else(|| anyhow::anyhow!("LPSECURITY_ATTRIBUTES should be a typedef hit"))?;
+
+        // The hit's flattened TypeProperties point at the canonical struct.
+        assert_eq!(lp.properties.is_pointer, true);
+        assert_eq!(
+            lp.properties.underlying_record.as_deref(),
+            Some("_SECURITY_ATTRIBUTES"),
+            "pointer typedef should expose its underlying record"
+        );
+
+        // Expansion step: pull that struct in.
+        if let Some(record_name) = lp.properties.underlying_record.as_deref()
+            && let Some(s) = find_struct_by_name(&tu, record_name, Some(&idx))
+        {
+            structs.push(s);
+        }
+
+        let expanded = find_struct(&structs, "_SECURITY_ATTRIBUTES")
+            .ok_or_else(|| anyhow::anyhow!("expansion should pull in _SECURITY_ATTRIBUTES"))?;
+        assert!(
+            expanded
+                .get_aliases()
+                .iter()
+                .any(|a| a == "SECURITY_ATTRIBUTES"),
+            "expanded struct should carry the direct typedef alias, got {:?}",
+            expanded.get_aliases()
+        );
+        assert!(
+            !expanded.get_fields().is_empty(),
+            "expanded struct should have its fields populated"
+        );
+
+        Ok(())
+    }
+
+    /// `find_struct_by_name` resolves a canonical name to a single
+    /// struct with aliases attached.
+    #[test]
+    #[serial]
+    fn find_struct_by_name_attaches_aliases() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let idx = TypedefIndex::build(&tu);
+        let s = find_struct_by_name(&tu, "_SECURITY_ATTRIBUTES", Some(&idx))
+            .ok_or_else(|| anyhow::anyhow!("_SECURITY_ATTRIBUTES must resolve"))?;
+        assert_eq!(s.get_name(), "_SECURITY_ATTRIBUTES");
+        assert!(
+            s.get_aliases().iter().any(|a| a == "SECURITY_ATTRIBUTES"),
+            "aliases should include SECURITY_ATTRIBUTES, got {:?}",
+            s.get_aliases()
+        );
+
         Ok(())
     }
 
