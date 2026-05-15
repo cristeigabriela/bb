@@ -117,23 +117,37 @@ impl IrqlConstraint {
     /// Resolve this constraint to a `[min, max]` numeric IRQL range
     /// according to its operator. See [`matches`](Self::matches) for the
     /// mapping. Returns `None` when the level can't be resolved (e.g.
-    /// `DIRQL`).
-    ///
-    /// `HIGH_LEVEL` is used as the canonical upper bound; we don't
-    /// special-case wraparound (operators in practice anchor at named
-    /// levels, never at `HIGH_LEVEL + 1`).
+    /// `DIRQL`) **or** when the operator would produce a degenerate
+    /// (empty) range — `< PASSIVE_LEVEL` and `> HIGH_LEVEL` both
+    /// describe an impossible IRQL window, and silently collapsing them
+    /// to `[0,0]` / `[HIGH,HIGH]` would make `= PASSIVE_LEVEL` / `=
+    /// HIGH_LEVEL` filters incorrectly match those entries.
     fn as_range(&self, lookup: &HashMap<String, u64>) -> Option<(u64, u64)> {
         let lvl = self.resolve_level(lookup)?;
         let high = lookup.get("HIGH_LEVEL").copied().unwrap_or(31);
         let op = self.op.as_deref().unwrap_or("=");
-        Some(match op {
-            "=" | "==" => (lvl, lvl),
-            "<=" => (0, lvl),
-            "<" => (0, lvl.saturating_sub(1)),
-            ">=" => (lvl, high),
-            ">" => (lvl.saturating_add(1).min(high), high),
-            _ => (lvl, lvl),
-        })
+        match op {
+            "=" | "==" => Some((lvl, lvl)),
+            "<=" => Some((0, lvl)),
+            "<" => {
+                if lvl == 0 {
+                    // `< PASSIVE_LEVEL` is impossible — no IRQL is < 0.
+                    None
+                } else {
+                    Some((0, lvl - 1))
+                }
+            }
+            ">=" => Some((lvl, high)),
+            ">" => {
+                if lvl >= high {
+                    // `> HIGH_LEVEL` is impossible — nothing runs above HIGH_LEVEL.
+                    None
+                } else {
+                    Some((lvl + 1, high))
+                }
+            }
+            _ => Some((lvl, lvl)),
+        }
     }
 }
 
@@ -440,6 +454,33 @@ mod tests {
         };
         assert_eq!(bare_apc.matches(&bare, &lookup()), Some(true));
         assert_eq!(bare_apc.matches(&eq, &lookup()), Some(true));
+    }
+
+    /// `< PASSIVE_LEVEL` is an impossible function constraint (nothing
+    /// runs below PASSIVE). Treating it as a degenerate `[0, 0]` would
+    /// cause it to incorrectly match `= PASSIVE_LEVEL` filters; we
+    /// return `None` so the entry is dropped instead.
+    #[test]
+    fn range_function_lt_passive_is_impossible() {
+        let func = IrqlConstraint {
+            level: "PASSIVE_LEVEL".into(),
+            op: Some("<".into()),
+        };
+        let any_filter = parse_constraint("= PASSIVE_LEVEL").unwrap();
+        assert_eq!(func.matches(&any_filter, &lookup()), None);
+    }
+
+    /// `> HIGH_LEVEL` is similarly impossible — nothing runs above
+    /// HIGH_LEVEL. Returning `None` instead of `[HIGH, HIGH]` keeps it
+    /// from matching `= HIGH_LEVEL` filters.
+    #[test]
+    fn range_function_gt_high_is_impossible() {
+        let func = IrqlConstraint {
+            level: "HIGH_LEVEL".into(),
+            op: Some(">".into()),
+        };
+        let any_filter = parse_constraint("= HIGH_LEVEL").unwrap();
+        assert_eq!(func.matches(&any_filter, &lookup()), None);
     }
 
     /// Strict-less filter `< APC_LEVEL` asks: is the function's max < 1?

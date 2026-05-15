@@ -156,6 +156,18 @@ fn parse_irql_arg(s: &str) -> Result<IrqlConstraint, String> {
 fn main() -> Result<()> {
     let args = Args::parse();
 
+    // `--irql` operates on `bb-sparse`'s driver dataset (the only one with
+    // documented IRQL constraints). The help text says it "Implies --mode
+    // kernel" — enforce that contract explicitly so a user running
+    // `bb-funcs --irql ...` against user-mode headers gets a clear error
+    // instead of silent empty results (user-mode functions parse cleanly
+    // but never carry an IRQL constraint).
+    if args.irql.is_some() && matches!(args.shared.mode, bb_sdk::SdkMode::User) {
+        anyhow::bail!(
+            "--irql requires --mode kernel; IRQL constraints only apply to driver / kernel-mode DDIs"
+        );
+    }
+
     // Build header configuration.
     let config = get_header_config(&args.shared)?;
 

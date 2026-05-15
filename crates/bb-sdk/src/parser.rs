@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clang::{Index, TranslationUnit, Unsaved};
 
+use crate::HeaderConfigKind;
 use crate::cache;
 use crate::phnt::{PhntVersion, phnt_synthetic_header};
 use crate::winsdk::{SdkInfo, SdkMode, sdk_header};
@@ -28,10 +29,11 @@ pub fn parse_winsdk<'a>(
     sdk: &SdkInfo,
     args: &[String],
     mode: SdkMode,
+    kind: HeaderConfigKind,
     detailed_preprocessing: bool,
 ) -> Result<TranslationUnit<'a>> {
     let synthetic_path = sdk.get_include_dir().join("__bb_synthetic.h");
-    let header_content = sdk_header(mode);
+    let header_content = sdk_header(mode, kind);
     parse_with_cache(
         index,
         &synthetic_path,

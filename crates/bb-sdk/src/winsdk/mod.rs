@@ -8,6 +8,8 @@ use colored::Colorize;
 use std::env::var;
 use std::path::PathBuf;
 
+use crate::HeaderConfigKind;
+
 /* ────────────────────────────────── Types ───────────────────────────────── */
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum)]
@@ -233,19 +235,68 @@ pub fn check_wdk_installed(sdk: &SdkInfo) -> Result<()> {
 
 /* ---------------------------- Header generation --------------------------- */
 
-/// A group of related `#include` headers, optionally preceded by raw
-/// preprocessor directives.
-///
-/// `pre_lines` lets a group emit arbitrary preprocessor text — typically
-/// `#undef X` — *between* the previous group's includes and this group's
-/// includes. The user-mode `ntstatus.h` group uses it for the
-/// `#undef WIN32_NO_STATUS` dance that lets `ntstatus.h`'s body emit
-/// after the windows.h chain has already been processed with the gate on.
-/// Kept empty (`&[]`) for groups that just `#include` headers.
-struct HeaderGroup {
-    comment: &'static str,
-    pre_lines: &'static [&'static str],
-    includes: &'static [&'static str],
+/// A set of related `#include`s emitted as one block in the synthetic header.
+pub(crate) struct HeaderGroup {
+    /// Section header rendered as `// {comment}` above the includes.
+    /// Pure documentation — clang ignores it.
+    pub(crate) comment: &'static str,
+
+    /// Raw preprocessor lines emitted just before this group's includes
+    /// (e.g. `#undef WIN32_NO_STATUS`). Kept empty for groups that just
+    /// `#include` headers. Effects are scoped to the rest of the TU —
+    /// there's no automatic restore.
+    pub(crate) pre_lines: &'static [&'static str],
+
+    /// `#include <…>` directives, emitted in declaration order.
+    pub(crate) includes: &'static [&'static str],
+
+    /// Build kinds this group is **omitted** from. `None` (the common
+    /// case) means "include everywhere"; `Some(&[HeaderConfigKind::Phnt])`
+    /// excludes from phnt-overlaid builds. Structural replacement for
+    /// the old `.replace("#include <winternl.h>\n", "")` string dance
+    /// which silently broke if the emitted line format ever changed.
+    pub(crate) skip_for: Option<&'static [HeaderConfigKind]>,
+}
+
+impl HeaderGroup {
+    /// Construct a HeaderGroup with just a comment and a list of
+    /// includes — the common case. Use [`with_pre_lines`] /
+    /// [`skip_for`] to layer on the optional extras.
+    ///
+    /// [`with_pre_lines`]: Self::with_pre_lines
+    /// [`skip_for`]: Self::skip_for
+    pub(crate) const fn new(comment: &'static str, includes: &'static [&'static str]) -> Self {
+        Self {
+            comment,
+            pre_lines: &[],
+            includes,
+            skip_for: None,
+        }
+    }
+
+    /// Attach raw preprocessor lines that emit before the includes.
+    /// Used for `#undef WIN32_NO_STATUS` on the user-mode ntstatus
+    /// group and similar surgical scaffolding.
+    pub(crate) const fn with_pre_lines(mut self, lines: &'static [&'static str]) -> Self {
+        self.pre_lines = lines;
+        self
+    }
+
+    /// Mark this group as excluded from the listed build kinds.
+    /// `.skip_for(&[HeaderConfigKind::Phnt])` keeps the group out of
+    /// any phnt-overlaid synthetic header.
+    pub(crate) const fn skip_for(mut self, kinds: &'static [HeaderConfigKind]) -> Self {
+        self.skip_for = Some(kinds);
+        self
+    }
+
+    /// Whether this group should be emitted for the given build kind.
+    pub(crate) fn applies_to(&self, kind: HeaderConfigKind) -> bool {
+        match self.skip_for {
+            Some(skips) => !skips.contains(&kind),
+            None => true,
+        }
+    }
 }
 
 /// Build a header string from structured components.
@@ -264,6 +315,7 @@ fn build_header(
     guarded_defines: &[(&str, &str)],
     raw_defines: &[(&str, &str)],
     groups: &[HeaderGroup],
+    kind: HeaderConfigKind,
 ) -> String {
     use std::fmt::Write;
 
@@ -280,7 +332,7 @@ fn build_header(
     }
     out.push('\n');
 
-    for group in groups {
+    for group in groups.iter().filter(|g| g.applies_to(kind)) {
         let _ = writeln!(out, "// {}", group.comment);
         for line in group.pre_lines {
             let _ = writeln!(out, "{line}");
@@ -294,22 +346,31 @@ fn build_header(
     out
 }
 
-/// Generate the SDK header string for the given mode.
+/// Generate the SDK header string for the given mode + build kind.
 ///
-/// For [`SdkMode::User`], sets up user-mode headers and defines.
-/// For [`SdkMode::Kernel`], sets up kernel headers and defines.
+/// `mode` selects the user vs kernel header set; `kind` selects which
+/// build kind we're emitting for, used to filter out [`HeaderGroup`]s
+/// flagged `.skip_for(&[…])` (currently `winternl.h` and `winusb.h`,
+/// both of which drop out under [`HeaderConfigKind::Phnt`]).
 ///
-/// Both modes terminate with an `ntstatus.h` HeaderGroup that ensures
-/// the full set of `STATUS_*` codes is available — user mode uses the
-/// `WIN32_NO_STATUS` dance (see `user::GROUPS`); kernel mode pulls
-/// `ntstatus.h` directly as a fallback for when ntifs.h's chain isn't
-/// reachable (no WDK installed).
+/// Both user and kernel mode include an `ntstatus.h` HeaderGroup that
+/// ensures the full set of `STATUS_*` codes is available. **User mode**
+/// uses the `WIN32_NO_STATUS` dance and places the group right after
+/// "Core Windows" so downstream headers like `dbgeng.h` (which
+/// references `DBG_COMMAND_EXCEPTION` from ntstatus.h) parse cleanly.
+/// **Kernel mode** appends the group at the end as a fallback for when
+/// ntifs.h's chain isn't reachable (no WDK installed); when ntifs.h is
+/// present it transitively pulls ntstatus.h earlier and the trailing
+/// group's `_NTSTATUS_` guard makes it a no-op.
 #[must_use]
-pub fn sdk_header(mode: SdkMode) -> String {
+pub fn sdk_header(mode: SdkMode, kind: HeaderConfigKind) -> String {
     match mode {
-        SdkMode::User => build_header(user::GUARDED_DEFINES, user::RAW_DEFINES, user::GROUPS),
-        SdkMode::Kernel => {
-            build_header(kernel::GUARDED_DEFINES, kernel::RAW_DEFINES, kernel::GROUPS)
-        }
+        SdkMode::User => build_header(user::GUARDED_DEFINES, user::RAW_DEFINES, user::GROUPS, kind),
+        SdkMode::Kernel => build_header(
+            kernel::GUARDED_DEFINES,
+            kernel::RAW_DEFINES,
+            kernel::GROUPS,
+            kind,
+        ),
     }
 }
