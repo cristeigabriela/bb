@@ -1,6 +1,7 @@
 //! User-mode SDK header configuration.
 
 use super::HeaderGroup;
+use crate::HeaderConfigKind;
 
 /// `#ifndef`-guarded defines for user-mode.
 pub(super) const GUARDED_DEFINES: &[(&str, &str)] = &[
@@ -12,14 +13,18 @@ pub(super) const GUARDED_DEFINES: &[(&str, &str)] = &[
 
 /// Raw (unguarded) defines for user-mode.
 ///
-/// `WIN32_NO_STATUS` tells `winnt.h` to skip its small inline subset of
-/// `STATUS_*` macros so the full set can come from `ntstatus.h` without
-/// redefinition errors. The dedicated "NTSTATUS codes (full set)"
-/// HeaderGroup in [`GROUPS`] — placed right after "Core Windows" so
-/// later headers like `dbgeng.h` can see the codes it emits — undoes
-/// this via `pre_lines: &["#undef WIN32_NO_STATUS"]`. The undef is
-/// permanent for the rest of the parse; no other SDK header relies on
-/// `WIN32_NO_STATUS` being set after winnt.h has finished.
+/// `WIN32_NO_STATUS` tells `winnt.h` to skip its small inline subset
+/// of `STATUS_*` macros so the full set can come from `ntstatus.h`
+/// without redefinition errors.
+///
+/// The dedicated "NTSTATUS codes (full set)" HeaderGroup in
+/// [`GROUPS`] — placed right after "Core Windows" so later headers
+/// like `dbgeng.h` can see the codes it emits — undoes this via
+/// `pre_lines: &["#undef WIN32_NO_STATUS"]`.
+///
+/// The undef is permanent for the rest of the parse; no other SDK
+/// header relies on `WIN32_NO_STATUS` being set after winnt.h has
+/// finished.
 pub(super) const RAW_DEFINES: &[(&str, &str)] = &[("WIN32_NO_STATUS", "")];
 
 /// Grouped `#include` sections for user-mode.
@@ -38,15 +43,18 @@ pub(super) const GROUPS: &[HeaderGroup] = &[
     // phnt.h" because its private NT API set is a superset of
     // winternl's redacted public surface.
     HeaderGroup::new("NT internals (user-mode subset)", &["winternl.h"])
-        .skip_for(&[crate::HeaderConfigKind::Phnt]),
+        .skip_for(&[HeaderConfigKind::Phnt]),
     // NTSTATUS codes must land *here*, not at the end of GROUPS.
     //
     // `RAW_DEFINES` set `WIN32_NO_STATUS` so winnt.h (pulled by
     // windows.h above) skipped its tiny inline `STATUS_*` defines.
+    //
     // Undo the gate now and emit `ntstatus.h`'s full ~2800-code set
     // before any downstream header references symbols that live in
-    // ntstatus.h. `dbgeng.h` in particular uses `DBG_COMMAND_EXCEPTION`,
-    // which only ntstatus.h provides — without this group at this
+    // ntstatus.h.
+    //
+    // `dbgeng.h` in particular uses `DBG_COMMAND_EXCEPTION`, which
+    // only ntstatus.h provides — without this group at this
     // position, dbgeng.h's parse errors out.
     HeaderGroup::new("NTSTATUS codes (full set)", &["ntstatus.h"])
         .with_pre_lines(&["#undef WIN32_NO_STATUS"]),
@@ -224,7 +232,7 @@ pub(super) const GROUPS: &[HeaderGroup] = &[
     // be defined before include; not wired up.
     // winusb pulls `shared/usb.h` whose stub `typedef PVOID PIRP`
     // conflicts with phnt's real `typedef struct _IRP *PIRP`.
-    HeaderGroup::new("WinUSB", &["winusb.h"]).skip_for(&[crate::HeaderConfigKind::Phnt]),
+    HeaderGroup::new("WinUSB", &["winusb.h"]).skip_for(&[HeaderConfigKind::Phnt]),
     HeaderGroup::new(
         "Virtual disk + Filter Manager user / Catalog / Peer Dist / DRT",
         &["virtdisk.h", "fltuser.h", "mscat.h", "peerdist.h", "drt.h"],

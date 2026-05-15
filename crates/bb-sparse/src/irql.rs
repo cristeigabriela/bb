@@ -115,13 +115,15 @@ impl IrqlConstraint {
     }
 
     /// Resolve this constraint to a `[min, max]` numeric IRQL range
-    /// according to its operator. See [`matches`](Self::matches) for the
-    /// mapping. Returns `None` when the level can't be resolved (e.g.
-    /// `DIRQL`) **or** when the operator would produce a degenerate
-    /// (empty) range — `< PASSIVE_LEVEL` and `> HIGH_LEVEL` both
-    /// describe an impossible IRQL window, and silently collapsing them
-    /// to `[0,0]` / `[HIGH,HIGH]` would make `= PASSIVE_LEVEL` / `=
-    /// HIGH_LEVEL` filters incorrectly match those entries.
+    /// according to its operator. See [`matches`](Self::matches) for
+    /// the mapping.
+    ///
+    /// Returns `None` when the level can't be resolved (e.g. `DIRQL`)
+    /// **or** when the operator would produce a degenerate (empty)
+    /// range. `< PASSIVE_LEVEL` and `> HIGH_LEVEL` both describe an
+    /// impossible IRQL window; silently collapsing them to `[0,0]` /
+    /// `[HIGH,HIGH]` would make `= PASSIVE_LEVEL` / `= HIGH_LEVEL`
+    /// filters incorrectly match those entries.
     fn as_range(&self, lookup: &HashMap<String, u64>) -> Option<(u64, u64)> {
         let lvl = self.resolve_level(lookup)?;
         let high = lookup.get("HIGH_LEVEL").copied().unwrap_or(31);
@@ -333,11 +335,14 @@ mod tests {
 
     /* ──────── Range semantics (issue #23 regressions) ──────── */
 
-    /// `<= DISPATCH_LEVEL` covers PASSIVE..=DISPATCH (range [0, 2]).
-    /// A filter of `> PASSIVE_LEVEL` asks for functions whose MIN is > 0.
-    /// Since this function's min is 0, it must NOT match.
-    /// This is the issue #23 repro: bb-funcs returned `RtlInitUTF8StringEx`
-    /// (`<= DISPATCH_LEVEL`) for `> PASSIVE_LEVEL`.
+    /// `<= DISPATCH_LEVEL` covers PASSIVE..=DISPATCH (range `[0, 2]`).
+    ///
+    /// A filter of `> PASSIVE_LEVEL` asks for functions whose MIN is
+    /// > 0. Since this function's min is 0, it must NOT match.
+    ///
+    /// This is the issue #23 repro: bb-funcs returned
+    /// `RtlInitUTF8StringEx` (`<= DISPATCH_LEVEL`) for
+    /// `> PASSIVE_LEVEL`.
     #[test]
     fn range_le_dispatch_does_not_match_gt_passive() {
         let func = IrqlConstraint {

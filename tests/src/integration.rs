@@ -460,13 +460,17 @@ mod tests {
         Ok(())
     }
 
-    /// NTSTATUS codes (`STATUS_*`) live in `ntstatus.h` (under `shared/`),
-    /// which neither `windows.h` (user mode) nor `ntddk.h` (kernel mode
-    /// without WDK installed) pulls in. Issue #24: a kernel-mode user
-    /// without WDK installed saw zero `STATUS_*` codes. We now include
-    /// `ntstatus.h` directly in both modes via the synthetic-header coda
-    /// — guarded by `WIN32_NO_STATUS` in user mode so winnt.h's tiny
-    /// inline subset doesn't conflict with the full set ntstatus.h emits.
+    /// NTSTATUS codes (`STATUS_*`) live in `ntstatus.h` (under
+    /// `shared/`), which neither `windows.h` (user mode) nor
+    /// `ntddk.h` (kernel mode without WDK installed) pulls in.
+    ///
+    /// Issue #24: a kernel-mode user without WDK installed saw zero
+    /// `STATUS_*` codes.
+    ///
+    /// We now include `ntstatus.h` directly in both modes via the
+    /// synthetic-header coda — guarded by `WIN32_NO_STATUS` in user
+    /// mode so winnt.h's tiny inline subset doesn't conflict with the
+    /// full set ntstatus.h emits.
     #[test]
     #[serial]
     fn status_codes_present_user_mode() -> anyhow::Result<()> {
@@ -547,15 +551,19 @@ mod tests {
     /// PHNT user-mode: regression test for the half of #24 / the
     /// `cast_len` type-alias-macro fix surfaced during PR review.
     ///
-    /// Before the fix only the four `STATUS_SEVERITY_*` integer-literal
-    /// macros came through — every `((NTSTATUS)0x…L)`-shaped code was
-    /// silently dropped because `um/powerbase.h` emitted a transient
-    /// `#define NTSTATUS LONG` (gated on `NT_SUCCESS` not yet being
+    /// Before the fix only the four `STATUS_SEVERITY_*`
+    /// integer-literal macros came through — every
+    /// `((NTSTATUS)0x…L)`-shaped code was silently dropped.
+    ///
+    /// Root cause: `um/powerbase.h` emits a transient
+    /// `#define NTSTATUS LONG` gated on `NT_SUCCESS` not yet being
     /// defined, which is the case when `winternl.h` has been stripped
-    /// for phnt). That made `cast_len` refuse to strip the `(NTSTATUS)`
-    /// cast in `STATUS_*` bodies, so cexpr never evaluated them. The
-    /// fix taught `cast_len` to recognize type-alias macros (a macro
-    /// whose body is itself made of type-shaped tokens).
+    /// for phnt. That made `cast_len` refuse to strip the
+    /// `(NTSTATUS)` cast in `STATUS_*` bodies, so cexpr never
+    /// evaluated them.
+    ///
+    /// The fix taught `cast_len` to recognize type-alias macros
+    /// (a macro whose body is itself made of type-shaped tokens).
     #[test]
     #[serial]
     fn status_codes_present_phnt_user_mode() -> anyhow::Result<()> {

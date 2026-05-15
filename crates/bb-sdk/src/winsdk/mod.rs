@@ -348,20 +348,25 @@ fn build_header(
 
 /// Generate the SDK header string for the given mode + build kind.
 ///
-/// `mode` selects the user vs kernel header set; `kind` selects which
-/// build kind we're emitting for, used to filter out [`HeaderGroup`]s
-/// flagged `.skip_for(&[…])` (currently `winternl.h` and `winusb.h`,
-/// both of which drop out under [`HeaderConfigKind::Phnt`]).
+/// `mode` selects the user vs kernel header set.
+///
+/// `kind` selects which build kind we're emitting for, used to filter
+/// out [`HeaderGroup`]s flagged `.skip_for(&[…])`. Currently
+/// `winternl.h` and `winusb.h` both drop out under
+/// [`HeaderConfigKind::Phnt`].
 ///
 /// Both user and kernel mode include an `ntstatus.h` HeaderGroup that
-/// ensures the full set of `STATUS_*` codes is available. **User mode**
-/// uses the `WIN32_NO_STATUS` dance and places the group right after
-/// "Core Windows" so downstream headers like `dbgeng.h` (which
-/// references `DBG_COMMAND_EXCEPTION` from ntstatus.h) parse cleanly.
-/// **Kernel mode** appends the group at the end as a fallback for when
-/// ntifs.h's chain isn't reachable (no WDK installed); when ntifs.h is
-/// present it transitively pulls ntstatus.h earlier and the trailing
-/// group's `_NTSTATUS_` guard makes it a no-op.
+/// ensures the full set of `STATUS_*` codes is available.
+///
+/// **User mode** uses the `WIN32_NO_STATUS` dance and places the
+/// group right after "Core Windows" so downstream headers like
+/// `dbgeng.h` (which references `DBG_COMMAND_EXCEPTION` from
+/// ntstatus.h) parse cleanly.
+///
+/// **Kernel mode** appends the group at the end as a fallback for
+/// when ntifs.h's chain isn't reachable (no WDK installed). When
+/// ntifs.h is present it transitively pulls ntstatus.h earlier and
+/// the trailing group's `_NTSTATUS_` guard makes it a no-op.
 #[must_use]
 pub fn sdk_header(mode: SdkMode, kind: HeaderConfigKind) -> String {
     match mode {

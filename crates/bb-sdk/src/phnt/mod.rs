@@ -102,14 +102,15 @@ pub fn phnt_synthetic_header(version: PhntVersion, kernel_mode: bool) -> String 
         SdkMode::User
     };
 
-    // Generate the SDK umbrella for the PHNT build kind. HeaderGroups
-    // marked `.skip_for(&[HeaderConfigKind::Phnt])` — currently
-    // `winternl.h` (phnt errors with "Do not mix Winternl.h and
-    // phnt.h") and `winusb.h` (whose `shared/usb.h` stubs `PIRP`
-    // against phnt's real `_IRP`) — drop out automatically at
-    // emission time. Replaces the old `.replace("#include
-    // <winternl.h>\n", "")` string dance which silently broke on
-    // formatting changes.
+    // Generate the SDK umbrella for the PHNT build kind.
+    //
+    // HeaderGroups marked `.skip_for(&[HeaderConfigKind::Phnt])`
+    // drop out automatically at emission time. Currently:
+    //
+    // - `winternl.h` — phnt errors with "Do not mix Winternl.h and
+    //   phnt.h".
+    // - `winusb.h` — its `shared/usb.h` stubs `PIRP` against phnt's
+    //   real `_IRP`.
     let mut out = sdk_header(mode, HeaderConfigKind::Phnt);
 
     let _ = writeln!(out, "#define PHNT_VERSION {}", version.macro_name());
