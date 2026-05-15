@@ -9,6 +9,7 @@ use crate::ext::DeclarationKind;
 use crate::struct_::Field;
 use crate::struct_::Struct;
 use crate::typedef::TypedefIndex;
+use crate::union_::Union;
 
 /// Renders a struct in `WinDbg` `dt`-style format with Unicode box-drawing.
 ///
@@ -50,6 +51,46 @@ pub fn render_struct(
     );
 
     if let Some(size) = s.get_size() {
+        let _ = writeln!(out, "{}", format!("╰─ {size} bytes").dimmed());
+    }
+
+    out
+}
+
+/// Render a [`Union`] in the same tree style as [`render_struct`].
+///
+/// Mirrors `render_struct` field-for-field so `bb-types -s LARGE_INTEGER`
+/// produces a layout dump indistinguishable in structure from a struct
+/// render — the only material difference is the kind word in the header.
+#[must_use]
+pub fn render_union(
+    u: &Union,
+    depth: usize,
+    field_filter: Option<&str>,
+    typedef_index: Option<&TypedefIndex>,
+) -> String {
+    let mut out = super::render_type_header(
+        u.get_name(),
+        u.is_anonymous(),
+        None,
+        u.get_aliases(),
+        u.get_location(),
+    );
+
+    let mut seen = HashSet::new();
+    seen.insert(u.get_name().to_string());
+    write_fields(
+        &mut out,
+        u.get_fields(),
+        depth,
+        0,
+        "",
+        field_filter,
+        &mut seen,
+        typedef_index,
+    );
+
+    if let Some(size) = u.get_size() {
         let _ = writeln!(out, "{}", format!("╰─ {size} bytes").dimmed());
     }
 
@@ -122,7 +163,13 @@ fn write_fields(
         let name = field.get_name();
         let type_name = field.get_type_name();
 
-        let name_styled = if field_filter.is_some() {
+        // Synthetic names for nameless C-source fields are JSON-only
+        // identifiers — never shown in CLI/TUI. The `<anonymous union>`
+        // chip in the type column conveys the "this is anonymous"
+        // signal visually.
+        let name_styled = if field.is_anonymous() {
+            String::new().normal()
+        } else if field_filter.is_some() {
             name.white().bold().underline()
         } else {
             name.white().bold()
@@ -159,12 +206,19 @@ fn write_fields(
         );
 
         if current_depth < max_depth && field.has_children() {
-            let type_key = field
-                .get_underlying_type()
-                .get_declaration()
-                .and_then(|d| d.get_name());
+            // Use composite identity for anonymous fields (synthetic
+            // names alone collide across parents) and the underlying
+            // decl name for named ones.
+            let type_key = if let Some(aref) = field.get_anon_ref() {
+                Some(aref.identity())
+            } else {
+                field
+                    .get_underlying_type()
+                    .get_declaration()
+                    .and_then(|d| d.get_name())
+            };
 
-            if let Some(ref key) = type_key
+            if let Some(key) = type_key.as_ref()
                 && seen.insert(key.clone())
             {
                 let child_fields = field.get_child_fields();

@@ -6,7 +6,8 @@ mod tests {
     use bb_arch::reg::{X64Gpr, X86Gpr};
     use bb_arch::{Arch, MemoryOperand, ParamLocation, Register, ReturnLocation};
     use bb_clang::{
-        Enum, Function, Struct, ToJson, TypedefIndex, TypedefKind, build_referred_components,
+        Enum, Function, RecordKind, Struct, ToJson, TypedefIndex, TypedefKind,
+        build_referred_components,
     };
     use bb_consts_lib::{
         ConstFilter, build_lookup_table, collect_constants, collect_enums, filter_constants_by_name,
@@ -17,7 +18,8 @@ mod tests {
     };
     use bb_sdk::{HeaderConfig, SdkMode};
     use bb_types_lib::{
-        StructFilter, collect_structs, find_struct_by_name, find_typedef_hits, iter_structs,
+        StructFilter, collect_structs, collect_unions, find_struct_by_name, find_typedef_hits,
+        find_union_by_name, iter_structs, iter_unions,
     };
     use clang::{Clang, Index};
 
@@ -261,15 +263,19 @@ mod tests {
         let overlapped = find_struct(&structs, "_OVERLAPPED").expect("_OVERLAPPED must exist");
 
         // OVERLAPPED has nested anonymous struct/union types
-        let nested = overlapped.extract_nested_types(2);
-        // Just verify the method runs without panicking and returns valid structs
-        for n in &nested {
-            assert!(!n.get_name().is_empty(), "nested type should have a name");
+        let (nested_structs, nested_unions) = overlapped.extract_nested_records(2);
+        // Just verify the method runs without panicking and returns valid records.
+        for n in &nested_structs {
+            assert!(!n.get_name().is_empty(), "nested struct should have a name");
+        }
+        for n in &nested_unions {
+            assert!(!n.get_name().is_empty(), "nested union should have a name");
         }
 
-        // referenced_type_names should return named child types
-        let refs = overlapped.referenced_type_names();
-        for name in &refs {
+        // referenced_type_names returns names of named child records
+        // (both structs and unions); anonymous nested records are
+        // omitted because they have no string name.
+        for name in overlapped.referenced_type_names() {
             assert!(
                 !name.is_empty(),
                 "referenced type names should be non-empty"
@@ -623,6 +629,7 @@ mod tests {
 
         let j = guid.to_json();
         assert_eq!(j["name"], "_GUID");
+        assert_eq!(j["kind"], "struct");
         assert!(j["fields"].is_array(), "should have fields array");
         assert!(
             j["referenced_types"].is_array(),
@@ -652,7 +659,8 @@ mod tests {
             "should have referenced_types array"
         );
 
-        // types entries should NOT have a referenced_types field
+        // types entries should NOT have a referenced_types field — that
+        // lives at the top level when serialized via the slice path.
         let types = full["types"].as_array().unwrap();
         for t in types {
             assert!(
@@ -662,9 +670,12 @@ mod tests {
             );
         }
 
-        // _PEB has many nested struct types
-        let refs = full["referenced_types"].as_array().unwrap();
-        assert!(!refs.is_empty(), "_PEB should have nested referenced types");
+        // _PEB has many nested struct + union types.
+        let referenced = full["referenced_types"].as_array().unwrap();
+        assert!(
+            !referenced.is_empty(),
+            "_PEB should reference at least one nested record"
+        );
 
         Ok(())
     }
@@ -2058,10 +2069,7 @@ mod tests {
             handle.chain
         );
         assert!(
-            handle
-                .chain
-                .last()
-                .is_some_and(|s| s.contains("void")),
+            handle.chain.last().is_some_and(|s| s.contains("void")),
             "HANDLE chain should end at void *, got {:?}",
             handle.chain
         );
@@ -2069,9 +2077,11 @@ mod tests {
         Ok(())
     }
 
-    /// `bb-types -s LARGE_INTEGER` resolves through the typedef and
-    /// returns the canonical `_LARGE_INTEGER` struct with the alias
-    /// attached.
+    /// `bb-types -s FILETIME` resolves through the typedef and returns
+    /// the canonical `_FILETIME` struct with the alias attached.
+    /// (`_FILETIME` is a struct with a real typedef alias; the prior
+    /// `_LARGE_INTEGER` fixture was a union and is no longer findable
+    /// as a struct after the Union refactor.)
     #[test]
     #[serial]
     fn typedef_lookup_finds_canonical_struct() -> anyhow::Result<()> {
@@ -2079,24 +2089,24 @@ mod tests {
 
         let idx = TypedefIndex::build(&tu);
         let filter = StructFilter {
-            name_pattern: Some("LARGE_INTEGER".into()),
+            name_pattern: Some("FILETIME".into()),
             header_filter: None,
             case_sensitive: true,
         };
         let structs = collect_structs(&tu, &filter, Some(&idx));
 
-        let canonical = find_struct(&structs, "_LARGE_INTEGER")
-            .ok_or_else(|| anyhow::anyhow!("typedef search should hit _LARGE_INTEGER"))?;
+        let canonical = find_struct(&structs, "_FILETIME")
+            .ok_or_else(|| anyhow::anyhow!("typedef search should hit _FILETIME"))?;
         assert!(
-            canonical.get_aliases().iter().any(|a| a == "LARGE_INTEGER"),
-            "_LARGE_INTEGER should have aliases including LARGE_INTEGER, got {:?}",
+            canonical.get_aliases().iter().any(|a| a == "FILETIME"),
+            "_FILETIME should have aliases including FILETIME, got {:?}",
             canonical.get_aliases()
         );
 
         Ok(())
     }
 
-    /// Searching by canonical name (`_LARGE_INTEGER`) still attaches the
+    /// Searching by canonical name (`_FILETIME`) still attaches the
     /// typedef aliases to the struct, so JSON consumers always see both
     /// names regardless of which one the user typed.
     #[test]
@@ -2106,15 +2116,15 @@ mod tests {
 
         let idx = TypedefIndex::build(&tu);
         let filter = StructFilter {
-            name_pattern: Some("_LARGE_INTEGER".into()),
+            name_pattern: Some("_FILETIME".into()),
             header_filter: None,
             case_sensitive: true,
         };
         let structs = collect_structs(&tu, &filter, Some(&idx));
-        let canonical = find_struct(&structs, "_LARGE_INTEGER")
-            .ok_or_else(|| anyhow::anyhow!("canonical search should find _LARGE_INTEGER"))?;
+        let canonical = find_struct(&structs, "_FILETIME")
+            .ok_or_else(|| anyhow::anyhow!("canonical search should find _FILETIME"))?;
         assert!(
-            canonical.get_aliases().iter().any(|a| a == "LARGE_INTEGER"),
+            canonical.get_aliases().iter().any(|a| a == "FILETIME"),
             "aliases should be attached regardless of which name was searched, got {:?}",
             canonical.get_aliases()
         );
@@ -2132,22 +2142,25 @@ mod tests {
 
         let idx = TypedefIndex::build(&tu);
         let filter = StructFilter {
-            name_pattern: Some("_LARGE_INTEGER".into()),
+            name_pattern: Some("_FILETIME".into()),
             header_filter: None,
             case_sensitive: true,
         };
         let structs = collect_structs(&tu, &filter, Some(&idx));
-        let canonical = find_struct(&structs, "_LARGE_INTEGER")
-            .ok_or_else(|| anyhow::anyhow!("must find _LARGE_INTEGER"))?;
+        let canonical = find_struct(&structs, "_FILETIME")
+            .ok_or_else(|| anyhow::anyhow!("must find _FILETIME"))?;
 
         let j = canonical.to_json();
         let aliases = j["aliases"]
             .as_array()
             .expect("aliases must be an array in JSON");
-        let alias_names: Vec<&str> = aliases.iter().filter_map(serde_json::Value::as_str).collect();
+        let alias_names: Vec<&str> = aliases
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .collect();
         assert!(
-            alias_names.contains(&"LARGE_INTEGER"),
-            "JSON aliases array should contain LARGE_INTEGER, got {alias_names:?}"
+            alias_names.contains(&"FILETIME"),
+            "JSON aliases array should contain FILETIME, got {alias_names:?}"
         );
 
         Ok(())
@@ -2273,10 +2286,42 @@ mod tests {
     }
 
     /// Rendered struct header shows the `[aka …]` chip when aliases are
-    /// attached. Visible in both colored and stripped output.
+    /// attached. Visible in both colored and stripped output. Uses
+    /// `_FILETIME` (struct + typedef `FILETIME`) since named unions
+    /// now go through the parallel `collect_unions` path.
     #[test]
     #[serial]
     fn display_renders_aliases_chip() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let idx = TypedefIndex::build(&tu);
+        let filter = StructFilter {
+            name_pattern: Some("_FILETIME".into()),
+            header_filter: None,
+            case_sensitive: true,
+        };
+        let structs = collect_structs(&tu, &filter, Some(&idx));
+        let canonical = find_struct(&structs, "_FILETIME")
+            .ok_or_else(|| anyhow::anyhow!("must find _FILETIME"))?;
+
+        let rendered = canonical.display(0, None, Some(&idx));
+        assert!(
+            rendered.contains("[aka") && rendered.contains("FILETIME"),
+            "header should show `[aka FILETIME]` chip, got:\n{rendered}"
+        );
+
+        Ok(())
+    }
+
+    /* ───────────────────────────────── Unions ───────────────────────────────── */
+
+    /// `_LARGE_INTEGER` is a top-level named union. It must be findable
+    /// via `collect_unions` (the union counterpart of `collect_structs`)
+    /// but NOT via `collect_structs` — the Struct/Union types are
+    /// strictly disjoint.
+    #[test]
+    #[serial]
+    fn named_union_findable_via_collect_unions() -> anyhow::Result<()> {
         winsdk!(clang, index, tu);
 
         let idx = TypedefIndex::build(&tu);
@@ -2285,14 +2330,312 @@ mod tests {
             header_filter: None,
             case_sensitive: true,
         };
-        let structs = collect_structs(&tu, &filter, Some(&idx));
-        let canonical = find_struct(&structs, "_LARGE_INTEGER")
-            .ok_or_else(|| anyhow::anyhow!("must find _LARGE_INTEGER"))?;
+        let unions = collect_unions(&tu, &filter, Some(&idx));
+        let li = unions
+            .iter()
+            .find(|u| u.get_name() == "_LARGE_INTEGER")
+            .ok_or_else(|| anyhow::anyhow!("_LARGE_INTEGER must be findable as a union"))?;
 
-        let rendered = canonical.display(0, None, Some(&idx));
+        assert_eq!(li.kind(), RecordKind::Union);
         assert!(
-            rendered.contains("[aka") && rendered.contains("LARGE_INTEGER"),
-            "header should show `[aka LARGE_INTEGER]` chip, got:\n{rendered}"
+            li.get_aliases().iter().any(|a| a == "LARGE_INTEGER"),
+            "LARGE_INTEGER must be attached as an alias"
+        );
+
+        // The same name must NOT resolve via the struct path.
+        let structs = collect_structs(&tu, &filter, Some(&idx));
+        assert!(
+            structs.is_empty(),
+            "_LARGE_INTEGER must not appear in collect_structs (it's a union)"
+        );
+
+        Ok(())
+    }
+
+    /// Typedef-name search (`LARGE_INTEGER`) reaches the canonical union
+    /// `_LARGE_INTEGER`. Mirrors `typedef_lookup_finds_canonical_struct`
+    /// for the union path.
+    #[test]
+    #[serial]
+    fn typedef_lookup_finds_canonical_union() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let idx = TypedefIndex::build(&tu);
+        let filter = StructFilter {
+            name_pattern: Some("LARGE_INTEGER".into()),
+            header_filter: None,
+            case_sensitive: true,
+        };
+        let unions = collect_unions(&tu, &filter, Some(&idx));
+        let li = unions
+            .iter()
+            .find(|u| u.get_name() == "_LARGE_INTEGER")
+            .ok_or_else(|| anyhow::anyhow!("typedef LARGE_INTEGER should hit _LARGE_INTEGER"))?;
+        assert!(li.get_aliases().iter().any(|a| a == "LARGE_INTEGER"));
+
+        Ok(())
+    }
+
+    /// Union JSON shape mirrors Struct: `name`, `kind: "union"`,
+    /// `aliases`, `fields`, `referenced_types`.
+    #[test]
+    #[serial]
+    fn union_json_shape() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let idx = TypedefIndex::build(&tu);
+        let li = find_union_by_name(&tu, "_LARGE_INTEGER", Some(&idx))
+            .ok_or_else(|| anyhow::anyhow!("_LARGE_INTEGER must exist"))?;
+
+        let j = li.to_json();
+        assert_eq!(j["name"], "_LARGE_INTEGER");
+        assert_eq!(j["kind"], "union");
+        assert!(j["fields"].is_array(), "union must serialize fields array");
+        assert!(
+            j["referenced_types"].is_array(),
+            "union must include referenced_types slot"
+        );
+        let aliases = j["aliases"].as_array().expect("aliases must be an array");
+        let names: Vec<&str> = aliases
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .collect();
+        assert!(
+            names.contains(&"LARGE_INTEGER"),
+            "aliases should contain LARGE_INTEGER, got {names:?}"
+        );
+
+        Ok(())
+    }
+
+    /// `_OVERLAPPED` has a nameless inner anonymous union (and inside
+    /// that, a nameless anonymous struct). The new design represents
+    /// these via synthetic `<anonymous_N>` names + an `anon_ref` on
+    /// the field that points into the parent struct's
+    /// `referenced_types` slot. The two anonymous entries (union and
+    /// inner struct) coexist in the single `referenced_types` array,
+    /// distinguished by per-entry `kind`.
+    #[test]
+    #[serial]
+    fn overlapped_anon_records_in_referenced_types() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let overlapped = find_struct_by_name(&tu, "_OVERLAPPED", None)
+            .ok_or_else(|| anyhow::anyhow!("_OVERLAPPED must exist"))?;
+
+        // The anonymous union field is nameless in C — Field carries a
+        // synthetic `<anonymous_N>` name and the `is_anonymous` flag.
+        let anon_field = overlapped
+            .get_fields()
+            .iter()
+            .find(|f| f.is_anonymous() && f.get_anon_ref().is_some())
+            .ok_or_else(|| {
+                anyhow::anyhow!("_OVERLAPPED must have an anonymous union field with anon_ref")
+            })?;
+
+        let aref = anon_field
+            .get_anon_ref()
+            .expect("filter selected only fields with anon_ref");
+        assert_eq!(aref.kind, RecordKind::Union);
+        assert_eq!(aref.enclosing_record, "_OVERLAPPED");
+        assert_eq!(aref.field_path.len(), 1);
+        assert!(
+            aref.field_path[0].starts_with("<anonymous_"),
+            "field_path element should be a synthetic identifier, got {:?}",
+            aref.field_path[0]
+        );
+
+        // Full JSON exposes BOTH the anonymous union and the inner
+        // anonymous struct in the single `referenced_types` slot,
+        // distinguished by per-entry `kind`.
+        let full = overlapped.to_json_full();
+        let referenced = full["referenced_types"]
+            .as_array()
+            .expect("referenced_types must be an array");
+        assert!(
+            referenced
+                .iter()
+                .any(|u| u["enclosing_record"] == "_OVERLAPPED" && u["kind"] == "union"),
+            "_OVERLAPPED's anonymous union must surface in referenced_types, got:\n{}",
+            serde_json::to_string_pretty(&full["referenced_types"]).unwrap()
+        );
+        assert!(
+            referenced
+                .iter()
+                .any(|s| s["enclosing_record"] == "_OVERLAPPED" && s["kind"] == "struct"),
+            "_OVERLAPPED's nested anonymous struct must surface in referenced_types, got:\n{}",
+            serde_json::to_string_pretty(&full["referenced_types"]).unwrap()
+        );
+
+        Ok(())
+    }
+
+    /// `iter_unions` yields only top-level (named) unions. Anonymous
+    /// unions never appear at the TU root.
+    #[test]
+    #[serial]
+    fn iter_unions_yields_named_only() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let names: Vec<String> = iter_unions(&tu).filter_map(|e| e.get_name()).collect();
+        assert!(
+            !names.is_empty(),
+            "expected at least some named unions (e.g. _LARGE_INTEGER)"
+        );
+        assert!(
+            names.iter().any(|n| n == "_LARGE_INTEGER"),
+            "iter_unions must include _LARGE_INTEGER"
+        );
+
+        Ok(())
+    }
+
+    /// `_OVERLAPPED`'s field list must contain exactly 4 entries
+    /// after the anon-record synthesis: three named C FieldDecls and
+    /// the synthesized union slot at the right offset. This guards
+    /// against silent regressions in `build_anon_record_field` or
+    /// `anon_record_offset_in_parent` — both of which would cause
+    /// the synthetic entry to vanish, land at offset 0, or duplicate.
+    #[test]
+    #[serial]
+    fn overlapped_synthesizes_anon_union_at_offset_16() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let overlapped = find_struct_by_name(&tu, "_OVERLAPPED", None)
+            .ok_or_else(|| anyhow::anyhow!("_OVERLAPPED must exist"))?;
+
+        let fields = overlapped.get_fields();
+        assert_eq!(
+            fields.len(),
+            4,
+            "_OVERLAPPED must have exactly 4 member slots (3 named + 1 synthetic anon union), got {}",
+            fields.len()
+        );
+
+        // Three named FieldDecls.
+        assert_eq!(fields[0].get_name(), "Internal");
+        assert_eq!(fields[0].get_offset_bytes(), 0);
+        assert!(!fields[0].is_anonymous());
+        assert!(fields[0].get_field_decl().is_some());
+
+        assert_eq!(fields[1].get_name(), "InternalHigh");
+        assert_eq!(fields[1].get_offset_bytes(), 8);
+
+        assert_eq!(fields[3].get_name(), "hEvent");
+        assert_eq!(fields[3].get_offset_bytes(), 24);
+
+        // Slot 2 is the synthetic anon union — non-zero offset is the
+        // critical correctness bit (the unwrap_or(0) fallback bug
+        // would have placed it at 0).
+        let anon = &fields[2];
+        assert!(anon.is_anonymous());
+        assert!(anon.get_name().starts_with("<anonymous_"));
+        assert_eq!(
+            anon.get_offset_bytes(),
+            16,
+            "synthetic anon union must sit at offset 16, got {}",
+            anon.get_offset_bytes()
+        );
+        assert_eq!(anon.get_size(), 8);
+
+        // Synthetic fields have no FieldDecl; their `entity` is the
+        // anon record decl itself.
+        assert!(
+            anon.get_field_decl().is_none(),
+            "synthetic anon entry must not expose a FieldDecl"
+        );
+
+        // anon_ref carries the cross-reference identity.
+        let aref = anon
+            .get_anon_ref()
+            .ok_or_else(|| anyhow::anyhow!("synthetic anon entry must carry anon_ref"))?;
+        assert_eq!(aref.kind, RecordKind::Union);
+        assert_eq!(aref.enclosing_record, "_OVERLAPPED");
+        assert_eq!(aref.field_path, vec!["<anonymous_0>"]);
+
+        Ok(())
+    }
+
+    /// The inner anonymous struct inside `_OVERLAPPED`'s anonymous
+    /// union appears in `referenced_types` with field_path
+    /// `["<anonymous_0>", "<anonymous_0>"]` — proving the per-parent
+    /// counter resets correctly at each nesting level (the design
+    /// invariant from the spec).
+    #[test]
+    #[serial]
+    fn overlapped_inner_anon_struct_has_nested_field_path() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let overlapped = find_struct_by_name(&tu, "_OVERLAPPED", None)
+            .ok_or_else(|| anyhow::anyhow!("_OVERLAPPED must exist"))?;
+
+        let full = overlapped.to_json_full();
+        let referenced = full["referenced_types"]
+            .as_array()
+            .expect("referenced_types must be an array");
+
+        let inner_struct = referenced
+            .iter()
+            .find(|e| e["kind"] == "struct" && e["enclosing_record"] == "_OVERLAPPED")
+            .ok_or_else(|| anyhow::anyhow!("inner anon struct must surface in referenced_types"))?;
+        let path: Vec<&str> = inner_struct["field_path"]
+            .as_array()
+            .expect("field_path must be array")
+            .iter()
+            .map(|v| v.as_str().unwrap_or(""))
+            .collect();
+        assert_eq!(
+            path,
+            vec!["<anonymous_0>", "<anonymous_0>"],
+            "inner anon struct must have a two-element field_path matching the nesting depth, got {path:?}"
+        );
+
+        Ok(())
+    }
+
+    /// `collect_unions` returns `_LARGE_INTEGER` with the
+    /// `LARGE_INTEGER` typedef alias attached.
+    #[test]
+    #[serial]
+    fn collect_unions_surfaces_large_integer_with_alias() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let idx = TypedefIndex::build(&tu);
+        let filter = StructFilter {
+            name_pattern: Some("_LARGE_INTEGER".into()),
+            header_filter: None,
+            case_sensitive: true,
+        };
+        let unions = collect_unions(&tu, &filter, Some(&idx));
+        let li = unions
+            .iter()
+            .find(|u| u.get_name() == "_LARGE_INTEGER")
+            .ok_or_else(|| anyhow::anyhow!("collect_unions must surface _LARGE_INTEGER"))?;
+        assert_eq!(li.kind(), RecordKind::Union);
+        assert!(
+            li.get_aliases().iter().any(|a| a == "LARGE_INTEGER"),
+            "LARGE_INTEGER alias must be attached, got {:?}",
+            li.get_aliases()
+        );
+
+        Ok(())
+    }
+
+    /// `Union::to_json_full` emits the same `{type, referenced_types}`
+    /// shape as `Struct::to_json_full`.
+    #[test]
+    #[serial]
+    fn union_to_json_full_shape() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let li = find_union_by_name(&tu, "_LARGE_INTEGER", None)
+            .ok_or_else(|| anyhow::anyhow!("_LARGE_INTEGER must exist"))?;
+        let full = li.to_json_full();
+        assert_eq!(full["type"]["name"], "_LARGE_INTEGER");
+        assert_eq!(full["type"]["kind"], "union");
+        assert!(
+            full["referenced_types"].is_array(),
+            "to_json_full must include referenced_types"
         );
 
         Ok(())
@@ -2407,7 +2750,8 @@ mod tests {
         assert_eq!(j["pointer_depth"], 1);
         assert_eq!(j["underlying_type"], "void");
         assert!(
-            j.get("underlying_record").is_none_or(serde_json::Value::is_null),
+            j.get("underlying_record")
+                .is_none_or(serde_json::Value::is_null),
             "HANDLE should not have underlying_record (void has no record name), got {:?}",
             j["underlying_record"]
         );
@@ -2415,12 +2759,15 @@ mod tests {
         assert_eq!(j["is_function_pointer"], false);
 
         // Struct-typedef shape: inverse.
-        let li = idx.lookup("LARGE_INTEGER").expect("LARGE_INTEGER must exist");
+        let li = idx
+            .lookup("LARGE_INTEGER")
+            .expect("LARGE_INTEGER must exist");
         let j2 = serde_json::to_value(li).expect("Typedef serializes");
         assert_eq!(j2["is_pointer"], false);
         assert_eq!(j2["underlying_record"], "_LARGE_INTEGER");
         assert!(
-            j2.get("underlying_type").is_none_or(serde_json::Value::is_null),
+            j2.get("underlying_type")
+                .is_none_or(serde_json::Value::is_null),
             "LARGE_INTEGER should not have a primitive underlying_type (leaf is a union), got {:?}",
             j2["underlying_type"]
         );
@@ -2461,7 +2808,7 @@ mod tests {
             .ok_or_else(|| anyhow::anyhow!("LPSECURITY_ATTRIBUTES should be a typedef hit"))?;
 
         // The hit's flattened TypeProperties point at the canonical struct.
-        assert_eq!(lp.properties.is_pointer, true);
+        assert!(lp.properties.is_pointer);
         assert_eq!(
             lp.properties.underlying_record.as_deref(),
             Some("_SECURITY_ATTRIBUTES"),

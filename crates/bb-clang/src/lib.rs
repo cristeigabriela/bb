@@ -14,11 +14,13 @@ mod enum_;
 mod error;
 mod ext;
 mod function;
-mod json;
+pub mod json;
 pub(crate) mod location;
+mod record;
 mod struct_;
 mod type_info;
 mod typedef;
+mod union_;
 
 pub use constant::{
     ConstLookup, ConstValue, Constant, MacroBodyToken, StripOuterParens, TuEntityMap,
@@ -28,14 +30,19 @@ pub use display::render_constants;
 pub use enum_::Enum;
 pub use error::{
     ConstantError, EnumError, FieldError, FunctionError, SourceLocationError, StructError,
+    UnionError,
 };
 pub use function::{CallConv, Function, Param};
-pub use json::{ToJson, build_referred_components, collect_component_constants};
+pub use json::{
+    ToJson, build_referred_components, collect_component_constants, records_to_json_full,
+};
 pub use location::{SourceLocation, entity_in_header};
+pub use record::{AnonRef, RecordKind};
 pub use struct_::Field;
 pub use struct_::Struct;
 pub use type_info::{TypeInfo, TypeProperties};
 pub use typedef::{Typedef, TypedefIndex, TypedefKind};
+pub use union_::Union;
 
 // Re-export commonly used clang types for convenience
 pub use clang::{Entity, EntityKind, Index, TranslationUnit, Unsaved};

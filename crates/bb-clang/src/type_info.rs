@@ -308,4 +308,3 @@ pub(crate) const fn is_array_kind(k: TypeKind) -> bool {
 pub(crate) fn is_function_pointer(ty: &Type<'_>) -> bool {
     is_func_ptr(&ty.get_canonical_type())
 }
-

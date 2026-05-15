@@ -11,6 +11,7 @@ mod constant;
 mod enum_;
 mod function;
 mod struct_;
+mod typedef;
 
 pub use bb_arch::display::register_name;
 pub use constant::render_constants;
@@ -20,7 +21,8 @@ pub use function::{
     format_return_location, format_tags, render_function_detail, render_function_item,
     render_function_list,
 };
-pub use struct_::{render_struct, typedef_annotation};
+pub use struct_::{render_struct, render_union, typedef_annotation};
+pub use typedef::format_typedef_summary;
 
 /// Render a type header line: styled name + optional type info +
 /// optional aliases chip + optional location.

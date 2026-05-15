@@ -73,6 +73,26 @@ pub enum TypedefKind {
     Other,
 }
 
+impl TypedefKind {
+    /// Human-readable label for CLI / TUI rendering. Mirrors the
+    /// snake-case JSON serialization for everything except
+    /// [`Self::FunctionPointer`], which renders with a space for
+    /// readability.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Struct => "struct",
+            Self::Union => "union",
+            Self::Enum => "enum",
+            Self::FunctionPointer => "function pointer",
+            Self::Pointer => "pointer",
+            Self::Array => "array",
+            Self::Primitive => "primitive",
+            Self::Other => "other",
+        }
+    }
+}
+
 /// A single typedef entry: name + chain + canonical resolution +
 /// full type metadata (flattened from [`TypeProperties`]).
 ///
