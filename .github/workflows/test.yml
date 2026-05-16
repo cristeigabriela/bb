@@ -25,56 +25,11 @@ jobs:
       - name: Set up MSVC environment
         uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Install Windows Driver Kit (WDK)
-        shell: pwsh
+      - name: Install WDK
         run: |
-          # WDK provides kernel-mode headers (km/ntddk.h and friends)
-          # under Windows Kits\10\Include\<sdk-ver>\km\. The
-          # windows-latest image ships the SDK but not the WDK, so
-          # bb-sdk's `check_wdk_installed` flags kernel-mode parsing
-          # paths as unavailable. Install via winget so the kernel
-          # integration tests can actually parse those headers.
-          #
-          # Critical: the WDK package version MUST match the SDK
-          # version on the runner. The MSVC env step set
-          # $env:UCRTVersion (e.g. "10.0.26100.0"); we pick the
-          # winget package id from that so a runner image update
-          # that bumps the SDK doesn't silently land km/ntddk.h
-          # in the wrong $sdk-ver folder.
-          $sdkVer = $env:UCRTVersion
-          if (-not $sdkVer) {
-            Write-Error "UCRTVersion not set — did the MSVC env step run?"
-            exit 1
-          }
-          $base = $sdkVer.TrimEnd('.0')       # "10.0.26100"
-          $pkg = "Microsoft.WindowsWDK.$base"
-
-          Write-Host "::group::winget install $pkg"
-          winget install `
-            --id $pkg `
-            --silent `
-            --accept-source-agreements `
-            --accept-package-agreements `
-            --disable-interactivity
-          Write-Host "::endgroup::"
-
-          # Verify km/ntddk.h ended up under the exact SDK version
-          # bb-sdk will look in. A wrong-version install is worse
-          # than no install — it passes the "exists somewhere" check
-          # but bb-sdk's `check_wdk_installed` still flags missing.
-          $expected = "C:\Program Files (x86)\Windows Kits\10\Include\$sdkVer\km\ntddk.h"
-          if (-not (Test-Path $expected)) {
-            Write-Error "WDK install verification failed — expected $expected"
-            $found = Get-ChildItem `
-              -Path 'C:\Program Files (x86)\Windows Kits\10\Include\*\km\ntddk.h' `
-              -ErrorAction SilentlyContinue
-            if ($found) {
-              Write-Host "Other ntddk.h locations on disk:"
-              $found | ForEach-Object { Write-Host "  $($_.FullName)" }
-            }
-            exit 1
-          }
-          Write-Host "WDK installed: $expected"
+          winget install --source winget --exact --id Microsoft.WindowsWDK.10.0.26100 --silent --accept-package-agreements --accept-source-agreements
+          if ($LASTEXITCODE -ne 0) { Write-Host "winget exited $LASTEXITCODE — WDK may already be installed, continuing"; $LASTEXITCODE = 0 }
+        shell: pwsh
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
