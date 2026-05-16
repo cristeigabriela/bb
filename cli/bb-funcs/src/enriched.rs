@@ -41,16 +41,27 @@ impl<'a> EnrichedFunction<'a> {
     }
 }
 
-/// Mode-aware sparse lookup: prefer the dataset that matches the SDK mode,
-/// fall back to the other if the function isn't in the preferred one.
+/// Mode-pure sparse lookup: hit **only** the dataset that matches the SDK
+/// mode.
+///
+/// Used to be a "prefer-then-fall-back" lookup, but the fall-back forced
+/// the other dataset to lazily decompress + parse on every miss, which is
+/// a measurable cost (~tens of MB of compressed JSON per dataset). Since
+/// kernel-mode runs only care about driver metadata and user-mode runs
+/// only care about SDK metadata, we keep them strictly isolated: a
+/// `bb-funcs --mode user` invocation never touches the driver lookup,
+/// and vice versa. The cold-path memory and time savings are significant
+/// (several hundred ms on first invocation; sustained across the AST
+/// cache hit case too).
+///
+/// The trade-off: a small number of functions that only appear in the
+/// "wrong" dataset (e.g. a kernel DDI documented only in sdk-api, or
+/// vice versa) won't surface in their natural mode. In practice the
+/// two datasets are largely disjoint by purpose, so this is rare.
 fn lookup_for_mode(name: &str, mode: SdkMode) -> Option<Entry<'static>> {
     match mode {
-        SdkMode::Kernel => bb_sparse::lookup_driver(name)
-            .map(Entry::Driver)
-            .or_else(|| bb_sparse::lookup_sdk(name).map(Entry::Sdk)),
-        SdkMode::User => bb_sparse::lookup_sdk(name)
-            .map(Entry::Sdk)
-            .or_else(|| bb_sparse::lookup_driver(name).map(Entry::Driver)),
+        SdkMode::Kernel => bb_sparse::lookup_driver(name).map(Entry::Driver),
+        SdkMode::User => bb_sparse::lookup_sdk(name).map(Entry::Sdk),
     }
 }
 

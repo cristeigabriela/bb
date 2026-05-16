@@ -64,16 +64,19 @@ impl<'a> Constant<'a> {
         entity: Entity<'a>,
         tu_map: &TuEntityMap<'a>,
     ) -> Result<Self, ConstantError> {
-        Self::try_from_macro_impl(entity, &mut HashSet::new(), tu_map)
+        Self::try_from_macro_impl(entity, &mut HashSet::new(), tu_map, &mut HashMap::new())
     }
 
     /// Internal recursive implementation. Separated so that the TU entity map
     /// is built exactly once (in [`try_from_macro_recursive`]) and reused for
-    /// all recursive component resolutions.
+    /// all recursive component resolutions. `type_alias_cache` memoizes
+    /// [`is_type_alias_macro`] within a single top-level macro resolution
+    /// — see TODO at module bottom about cross-macro caching.
     fn try_from_macro_impl(
         entity: Entity<'a>,
         resolving: &mut HashSet<String>,
         tu_map: &TuEntityMap<'a>,
+        type_alias_cache: &mut HashMap<String, bool>,
     ) -> Result<Self, ConstantError> {
         let kind = entity.get_kind();
         if kind != EntityKind::MacroDefinition {
@@ -113,7 +116,7 @@ impl<'a> Constant<'a> {
         while i < body.len() {
             // Strip C-style cast patterns: `( TYPE )` where every identifier
             // inside is NOT a known constant (determined by tu_map).
-            let skip = cast_len(body, i, tu_map);
+            let skip = cast_len(body, i, tu_map, type_alias_cache);
             if skip > 0 {
                 has_transform = true;
                 i += skip;
@@ -133,9 +136,14 @@ impl<'a> Constant<'a> {
                     let resolved = match comp_entity.get_kind() {
                         EntityKind::MacroDefinition => {
                             // Recurse: reuse the same tu_map.
-                            Self::try_from_macro_impl(comp_entity, resolving, tu_map)
-                                .or_else(|_| Constant::try_from(comp_entity))
-                                .ok()
+                            Self::try_from_macro_impl(
+                                comp_entity,
+                                resolving,
+                                tu_map,
+                                type_alias_cache,
+                            )
+                            .or_else(|_| Constant::try_from(comp_entity))
+                            .ok()
                         }
                         _ => Constant::try_from(comp_entity).ok(),
                     };
@@ -239,14 +247,23 @@ pub fn build_tu_entity_map<'tu>(tu: &'tu TranslationUnit<'tu>) -> TuEntityMap<'t
 /// the tokens at `i` do not form a cast.
 ///
 /// A cast is `( TYPE )` where TYPE is one or more tokens that are either:
-/// - [`TokenKind::Identifier`] **not** present in `tu_map` (i.e. a type name),
+/// - [`TokenKind::Identifier`] not present in `tu_map` (i.e. a typedef name),
+/// - [`TokenKind::Identifier`] present in `tu_map` as a **type-alias macro**
+///   (its body is itself made of type tokens — e.g. `#define NTSTATUS LONG`,
+///   which `um/powerbase.h` emits in user-mode SDK; see
+///   [`is_type_alias_macro`] for the recursive criterion),
 /// - [`TokenKind::Keyword`] (e.g., `unsigned`, `long`, `int`),
 /// - [`TokenKind::Punctuation`] `*` (pointer marker).
 ///
-/// If any identifier inside the parens IS a known constant (present in
-/// `tu_map`), it is treated as a grouped expression (not a cast) and 0 is
-/// returned.
-fn cast_len(tokens: &[Token], i: usize, tu_map: &TuEntityMap) -> usize {
+/// If any identifier inside the parens IS a known **value** constant
+/// (present in `tu_map` with a non-type body), the parens are treated as
+/// a grouped expression rather than a cast and 0 is returned.
+fn cast_len(
+    tokens: &[Token],
+    i: usize,
+    tu_map: &TuEntityMap,
+    type_alias_cache: &mut HashMap<String, bool>,
+) -> usize {
     if tokens[i].get_kind() != TokenKind::Punctuation || tokens[i].get_spelling() != "(" {
         return 0;
     }
@@ -265,7 +282,7 @@ fn cast_len(tokens: &[Token], i: usize, tu_map: &TuEntityMap) -> usize {
 
         // Strip C-style cast patterns: `( TYPE )` where TYPE is one or more
         // identifier/keyword tokens and none of the identifiers are known
-        // constants.
+        // value constants.
         let kind = tokens[j].get_kind();
         let spelling = tokens[j].get_spelling();
 
@@ -277,7 +294,22 @@ fn cast_len(tokens: &[Token], i: usize, tu_map: &TuEntityMap) -> usize {
             TokenKind::Identifier if !tu_map.contains_key(&spelling) => {
                 has_type_token = true;
             }
-            TokenKind::Identifier => return 0,
+            // Identifier IS in tu_map. Normally that means "value
+            // constant — this isn't a cast". But the SDK contains
+            // type-alias macros like `#define NTSTATUS LONG` (powerbase.h
+            // does this when winternl.h hasn't already defined
+            // `NT_SUCCESS`, which fires in phnt user mode where we strip
+            // winternl.h). In that case `(NTSTATUS)` IS a valid cast —
+            // the identifier expands to type tokens, not a value. Defer
+            // to is_type_alias_macro for the recursive check (memoized
+            // via `type_alias_cache`).
+            TokenKind::Identifier => {
+                if is_type_alias_macro(tu_map, &spelling, &mut HashSet::new(), type_alias_cache) {
+                    has_type_token = true;
+                } else {
+                    return 0;
+                }
+            }
             TokenKind::Keyword => {
                 has_type_token = true;
             }
@@ -291,4 +323,84 @@ fn cast_len(tokens: &[Token], i: usize, tu_map: &TuEntityMap) -> usize {
     }
 
     0
+}
+
+/// Whether a macro in `tu_map` named `name` is a *type-alias macro* —
+/// i.e. one whose body consists entirely of type-shaped tokens
+/// (keywords, pointer `*`, identifiers that are themselves either
+/// not-in-`tu_map` or recursively type-alias macros). `#define NTSTATUS
+/// LONG` is the canonical case: the body is the single identifier
+/// `LONG`, which isn't a constant in `tu_map` — so the macro aliases
+/// the type `LONG`.
+///
+/// `cache` memoizes results across calls within the same macro
+/// resolution — `try_from_macro_impl` creates one fresh cache per
+/// top-level macro and threads it through every `cast_len` invocation
+/// in the body loop, avoiding repeated `entity.get_range().tokenize()`
+/// calls for the same identifier (`NTSTATUS` typically shows up many
+/// times in a single ntstatus.h-derived chain).
+///
+/// A separate `seen` set guards against pathological recursion through
+/// a chain of macros that name each other. Function-like macros are
+/// rejected outright — they're never types, regardless of body.
+fn is_type_alias_macro(
+    tu_map: &TuEntityMap,
+    name: &str,
+    seen: &mut HashSet<String>,
+    cache: &mut HashMap<String, bool>,
+) -> bool {
+    if let Some(&hit) = cache.get(name) {
+        return hit;
+    }
+    if !seen.insert(name.to_string()) {
+        return false; // cycle within this resolve — don't cache (resolve-local)
+    }
+    let result = is_type_alias_macro_uncached(tu_map, name, seen, cache);
+    cache.insert(name.to_string(), result);
+    result
+}
+
+// TODO: future: replace `is_type_alias_macro` detection entirely with a
+// pre-expansion pass over macro bodies. The idea (see
+// https://discourse.llvm.org/t/using-clang-to-expand-macros/25402 — when
+// you find a `CXCursor_MacroExpansion`, `clang_tokenize` over its extent
+// returns the expanded tokens) is to substitute identifier-in-`tu_map`
+// references with their resolved body tokens before `cast_len` sees the
+// stream. `(NTSTATUS)0x..L` would already be `(LONG)0x..L` by the time
+// cast detection runs, so cast_len doesn't need the
+// type-alias-recognition branch (or this whole helper). Bigger refactor
+// than the current targeted fix; flagged for later.
+fn is_type_alias_macro_uncached(
+    tu_map: &TuEntityMap,
+    name: &str,
+    seen: &mut HashSet<String>,
+    cache: &mut HashMap<String, bool>,
+) -> bool {
+    let Some(entity) = tu_map.get(name) else {
+        return false;
+    };
+    if entity.get_kind() != EntityKind::MacroDefinition {
+        return false;
+    }
+    if entity.is_function_like_macro() || entity.is_builtin_macro() {
+        return false;
+    }
+    let Some(range) = entity.get_range() else {
+        return false;
+    };
+    let tokens = range.tokenize();
+    // tokens[0] is the macro name itself. The body is the rest.
+    let body = &tokens[1..];
+    if body.is_empty() {
+        return false;
+    }
+    body.iter().all(|t| match t.get_kind() {
+        TokenKind::Keyword => true,
+        TokenKind::Identifier => {
+            let s = t.get_spelling();
+            !tu_map.contains_key(&s) || is_type_alias_macro(tu_map, &s, seen, cache)
+        }
+        TokenKind::Punctuation if t.get_spelling() == "*" => true,
+        _ => false,
+    })
 }

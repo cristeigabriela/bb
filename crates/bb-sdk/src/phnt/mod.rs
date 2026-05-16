@@ -1,5 +1,6 @@
 //! Module for working with PHNT from a developer command prompt environment.
 
+use crate::HeaderConfigKind;
 use crate::winsdk::{SdkMode, sdk_header};
 use clap::ValueEnum;
 
@@ -101,18 +102,16 @@ pub fn phnt_synthetic_header(version: PhntVersion, kernel_mode: bool) -> String 
         SdkMode::User
     };
 
-    // Start with the full mode-appropriate SDK umbrella (defines + every
-    // group of public headers we curate in winsdk/{user,kernel}.rs), then
-    // strip a few headers that fight phnt.h directly:
+    // Generate the SDK umbrella for the PHNT build kind.
     //
-    // - `winternl.h`: phnt.h errors out with "Do not mix Winternl.h and
-    //   phnt.h" — its private NT API set is a superset of winternl's
-    //   redacted public surface.
-    // - `winusb.h`: pulls `shared/usb.h` whose stub `typedef PVOID PIRP`
-    //   conflicts with phnt's real `typedef struct _IRP *PIRP`.
-    let mut out = sdk_header(mode)
-        .replace("#include <winternl.h>\n", "")
-        .replace("#include <winusb.h>\n", "");
+    // HeaderGroups marked `.skip_for(&[HeaderConfigKind::Phnt])`
+    // drop out automatically at emission time. Currently:
+    //
+    // - `winternl.h` — phnt errors with "Do not mix Winternl.h and
+    //   phnt.h".
+    // - `winusb.h` — its `shared/usb.h` stubs `PIRP` against phnt's
+    //   real `_IRP`.
+    let mut out = sdk_header(mode, HeaderConfigKind::Phnt);
 
     let _ = writeln!(out, "#define PHNT_VERSION {}", version.macro_name());
 

@@ -11,6 +11,21 @@ use clang::{Index, TranslationUnit};
 
 /* ────────────────────────────────── Types ───────────────────────────────── */
 
+/// Const-friendly discriminator over [`HeaderConfig`].
+///
+/// Mirrors the variant set without any runtime data so it can live in
+/// `const` initializers — used by
+/// [`crate::winsdk::HeaderGroup::skip_for`] to opt groups out of one
+/// build kind or the other. Get the kind for a runtime config via
+/// [`HeaderConfig::kind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HeaderConfigKind {
+    /// Plain `--winsdk` build (no phnt overlay).
+    WinSdk,
+    /// `--phnt` build (phnt.h overlaid on the SDK chain).
+    Phnt,
+}
+
 /// Configuration for parsing Windows headers.
 ///
 /// This enum encapsulates all the necessary configuration for parsing either
@@ -121,6 +136,19 @@ impl HeaderConfig {
         }
     }
 
+    /// Get the discriminator kind (WinSdk vs Phnt) for this configuration.
+    ///
+    /// Used to filter [`crate::winsdk::HeaderGroup`]s with `skip_for`
+    /// against the active build context without exposing the runtime
+    /// payload (`SdkInfo`, `PhntVersion`, …) to the matcher.
+    #[must_use]
+    pub const fn kind(&self) -> HeaderConfigKind {
+        match self {
+            Self::WinSdk { .. } => HeaderConfigKind::WinSdk,
+            Self::Phnt { .. } => HeaderConfigKind::Phnt,
+        }
+    }
+
     /// Get the SDK information for this configuration.
     #[must_use]
     pub const fn sdk(&self) -> &SdkInfo {
@@ -207,9 +235,10 @@ impl HeaderConfig {
         detailed_preprocessing: bool,
     ) -> Result<TranslationUnit<'a>> {
         let args = self.clang_args();
+        let kind = self.kind();
         match self {
             Self::WinSdk { sdk, mode, .. } => {
-                parse_winsdk(index, sdk, &args, *mode, detailed_preprocessing)
+                parse_winsdk(index, sdk, &args, *mode, kind, detailed_preprocessing)
             }
             Self::Phnt { version, mode, .. } => {
                 parse_phnt(index, &args, *version, *mode, detailed_preprocessing)

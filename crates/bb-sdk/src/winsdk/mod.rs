@@ -8,6 +8,8 @@ use colored::Colorize;
 use std::env::var;
 use std::path::PathBuf;
 
+use crate::HeaderConfigKind;
+
 /* ────────────────────────────────── Types ───────────────────────────────── */
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum)]
@@ -233,15 +235,76 @@ pub fn check_wdk_installed(sdk: &SdkInfo) -> Result<()> {
 
 /* ---------------------------- Header generation --------------------------- */
 
-/// A group of related `#include` headers.
-struct HeaderGroup {
-    comment: &'static str,
-    includes: &'static [&'static str],
+/// A set of related `#include`s emitted as one block in the synthetic header.
+pub(crate) struct HeaderGroup {
+    /// Section header rendered as `// {comment}` above the includes.
+    /// Pure documentation — clang ignores it.
+    pub(crate) comment: &'static str,
+
+    /// Raw preprocessor lines emitted just before this group's includes
+    /// (e.g. `#undef WIN32_NO_STATUS`). Kept empty for groups that just
+    /// `#include` headers. Effects are scoped to the rest of the TU —
+    /// there's no automatic restore.
+    pub(crate) pre_lines: &'static [&'static str],
+
+    /// `#include <…>` directives, emitted in declaration order.
+    pub(crate) includes: &'static [&'static str],
+
+    /// Build kinds this group is **omitted** from. `None` (the common
+    /// case) means "include everywhere"; `Some(&[HeaderConfigKind::Phnt])`
+    /// excludes from phnt-overlaid builds. Structural replacement for
+    /// the old `.replace("#include <winternl.h>\n", "")` string dance
+    /// which silently broke if the emitted line format ever changed.
+    pub(crate) skip_for: Option<&'static [HeaderConfigKind]>,
+}
+
+impl HeaderGroup {
+    /// Construct a HeaderGroup with just a comment and a list of
+    /// includes — the common case. Use [`with_pre_lines`] /
+    /// [`skip_for`] to layer on the optional extras.
+    ///
+    /// [`with_pre_lines`]: Self::with_pre_lines
+    /// [`skip_for`]: Self::skip_for
+    pub(crate) const fn new(comment: &'static str, includes: &'static [&'static str]) -> Self {
+        Self {
+            comment,
+            pre_lines: &[],
+            includes,
+            skip_for: None,
+        }
+    }
+
+    /// Attach raw preprocessor lines that emit before the includes.
+    /// Used for `#undef WIN32_NO_STATUS` on the user-mode ntstatus
+    /// group and similar surgical scaffolding.
+    pub(crate) const fn with_pre_lines(mut self, lines: &'static [&'static str]) -> Self {
+        self.pre_lines = lines;
+        self
+    }
+
+    /// Mark this group as excluded from the listed build kinds.
+    /// `.skip_for(&[HeaderConfigKind::Phnt])` keeps the group out of
+    /// any phnt-overlaid synthetic header.
+    pub(crate) const fn skip_for(mut self, kinds: &'static [HeaderConfigKind]) -> Self {
+        self.skip_for = Some(kinds);
+        self
+    }
+
+    /// Whether this group should be emitted for the given build kind.
+    pub(crate) fn applies_to(&self, kind: HeaderConfigKind) -> bool {
+        match self.skip_for {
+            Some(skips) => !skips.contains(&kind),
+            None => true,
+        }
+    }
 }
 
 /// Build a header string from structured components.
 ///
 /// Order: guarded `#define`s, raw `#define`s, then grouped `#include`s.
+/// Each group emits in order: a `//`-comment header, its `pre_lines` raw
+/// directives, and its `#include` lines.
+///
 /// Defines must come first so they apply when each header chain is parsed;
 /// in particular, kernel-mode `sdkddkver.h` (pulled in transitively by
 /// `ntddk.h` → `ntdef.h`) sees `DECLSPEC_DEPRECATED_DDK` already defined
@@ -252,6 +315,7 @@ fn build_header(
     guarded_defines: &[(&str, &str)],
     raw_defines: &[(&str, &str)],
     groups: &[HeaderGroup],
+    kind: HeaderConfigKind,
 ) -> String {
     use std::fmt::Write;
 
@@ -268,8 +332,11 @@ fn build_header(
     }
     out.push('\n');
 
-    for group in groups {
+    for group in groups.iter().filter(|g| g.applies_to(kind)) {
         let _ = writeln!(out, "// {}", group.comment);
+        for line in group.pre_lines {
+            let _ = writeln!(out, "{line}");
+        }
         for inc in group.includes {
             let _ = writeln!(out, "#include <{inc}>");
         }
@@ -279,18 +346,36 @@ fn build_header(
     out
 }
 
-/// Generate the SDK header string for the given mode.
+/// Generate the SDK header string for the given mode + build kind.
 ///
-/// For [`SdkMode::User`], sets up user-mode headers and defines.
-/// For [`SdkMode::Kernel`], sets up kernel headers and defines.
+/// `mode` selects the user vs kernel header set.
 ///
-/// This will be later used by clang to parse the included contents.
+/// `kind` selects which build kind we're emitting for, used to filter
+/// out [`HeaderGroup`]s flagged `.skip_for(&[…])`. Currently
+/// `winternl.h` and `winusb.h` both drop out under
+/// [`HeaderConfigKind::Phnt`].
+///
+/// Both user and kernel mode include an `ntstatus.h` HeaderGroup that
+/// ensures the full set of `STATUS_*` codes is available.
+///
+/// **User mode** uses the `WIN32_NO_STATUS` dance and places the
+/// group right after "Core Windows" so downstream headers like
+/// `dbgeng.h` (which references `DBG_COMMAND_EXCEPTION` from
+/// ntstatus.h) parse cleanly.
+///
+/// **Kernel mode** appends the group at the end as a fallback for
+/// when ntifs.h's chain isn't reachable (no WDK installed). When
+/// ntifs.h is present it transitively pulls ntstatus.h earlier and
+/// the trailing group's `_NTSTATUS_` guard makes it a no-op.
 #[must_use]
-pub fn sdk_header(mode: SdkMode) -> String {
+pub fn sdk_header(mode: SdkMode, kind: HeaderConfigKind) -> String {
     match mode {
-        SdkMode::User => build_header(user::GUARDED_DEFINES, &[], user::GROUPS),
-        SdkMode::Kernel => {
-            build_header(kernel::GUARDED_DEFINES, kernel::RAW_DEFINES, kernel::GROUPS)
-        }
+        SdkMode::User => build_header(user::GUARDED_DEFINES, user::RAW_DEFINES, user::GROUPS, kind),
+        SdkMode::Kernel => build_header(
+            kernel::GUARDED_DEFINES,
+            kernel::RAW_DEFINES,
+            kernel::GROUPS,
+            kind,
+        ),
     }
 }

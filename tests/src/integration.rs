@@ -16,7 +16,7 @@ mod tests {
     use bb_funcs_lib::{
         FuncFilter, FuncSort, ParamCountFilter, collect_funcs, collect_funcs_filtered,
     };
-    use bb_sdk::{HeaderConfig, SdkMode};
+    use bb_sdk::{HeaderConfig, PhntVersion, SdkMode};
     use bb_types_lib::{
         StructFilter, collect_structs, collect_unions, find_struct_by_name, find_typedef_hits,
         find_union_by_name, iter_structs, iter_unions,
@@ -44,6 +44,30 @@ mod tests {
             let $tu = _cfg
                 .parse(&$index, true)
                 .context("parsing winsdk headers")?;
+        };
+    }
+
+    /// PHNT counterpart of [`winsdk!`]. Defaults to AMD64 / `Win11` /
+    /// user-mode unless overridden.
+    macro_rules! phnt {
+        ($clang:ident, $index:ident, $tu:ident) => {
+            phnt!(
+                $clang,
+                $index,
+                $tu,
+                Arch::Amd64,
+                PhntVersion::Win11,
+                SdkMode::User
+            );
+        };
+        ($clang:ident, $index:ident, $tu:ident, $arch:expr, $version:expr, $mode:expr) => {
+            let $clang = Clang::new()
+                .map_err(anyhow::Error::msg)
+                .context("initializing libclang")?;
+            let $index = Index::new(&$clang, false, false);
+            let _cfg = HeaderConfig::phnt($arch, $version, $mode)
+                .context("creating phnt header config")?;
+            let $tu = _cfg.parse(&$index, true).context("parsing phnt headers")?;
         };
     }
 
@@ -432,6 +456,149 @@ mod tests {
             .find(|c| c.get_name() == "FALSE")
             .expect("FALSE must exist");
         assert_eq!(f.get_value().as_u64(), Some(0));
+
+        Ok(())
+    }
+
+    /// NTSTATUS codes (`STATUS_*`) live in `ntstatus.h` (under
+    /// `shared/`), which neither `windows.h` (user mode) nor
+    /// `ntddk.h` (kernel mode without WDK installed) pulls in.
+    ///
+    /// Issue #24: a kernel-mode user without WDK installed saw zero
+    /// `STATUS_*` codes.
+    ///
+    /// We now include `ntstatus.h` directly in both modes via the
+    /// synthetic-header coda — guarded by `WIN32_NO_STATUS` in user
+    /// mode so winnt.h's tiny inline subset doesn't conflict with the
+    /// full set ntstatus.h emits.
+    #[test]
+    #[serial]
+    fn status_codes_present_user_mode() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu);
+
+        let vars = collect_constants(&tu, &no_filter());
+
+        // STATUS_SUCCESS — the canonical zero status.
+        let success = vars
+            .iter()
+            .find(|c| c.get_name() == "STATUS_SUCCESS")
+            .expect("STATUS_SUCCESS must exist in user mode (via ntstatus.h coda)");
+        assert_eq!(success.get_value().as_u64(), Some(0));
+
+        // STATUS_INVALID_HANDLE — picks up the NTSTATUS error-code high bits.
+        let invalid_handle = vars
+            .iter()
+            .find(|c| c.get_name() == "STATUS_INVALID_HANDLE")
+            .expect("STATUS_INVALID_HANDLE must exist in user mode");
+        assert_eq!(invalid_handle.get_value().as_u64(), Some(0xC000_0008));
+
+        // STATUS_OBJECT_NAME_NOT_FOUND — a different range, NT object errors.
+        let obj_not_found = vars
+            .iter()
+            .find(|c| c.get_name() == "STATUS_OBJECT_NAME_NOT_FOUND")
+            .expect("STATUS_OBJECT_NAME_NOT_FOUND must exist");
+        assert_eq!(obj_not_found.get_value().as_u64(), Some(0xC000_0034));
+
+        // Density check — ntstatus.h ships thousands of STATUS_* codes.
+        // A handful means it didn't actually get included.
+        let status_count = vars
+            .iter()
+            .filter(|c| c.get_name().starts_with("STATUS_"))
+            .count();
+        assert!(
+            status_count > 1000,
+            "expected thousands of STATUS_* codes from ntstatus.h, got {status_count}"
+        );
+
+        Ok(())
+    }
+
+    /// Kernel mode: same STATUS_* contract. With WDK installed, ntifs.h
+    /// pulls ntstatus.h transitively; without WDK, the kernel-mode coda's
+    /// direct `#include <ntstatus.h>` is the only path. Either way the
+    /// codes must be present.
+    #[test]
+    #[serial]
+    fn status_codes_present_kernel_mode() -> anyhow::Result<()> {
+        winsdk!(clang, index, tu, Arch::Amd64, SdkMode::Kernel);
+
+        let vars = collect_constants(&tu, &no_filter());
+
+        let success = vars
+            .iter()
+            .find(|c| c.get_name() == "STATUS_SUCCESS")
+            .expect("STATUS_SUCCESS must exist in kernel mode");
+        assert_eq!(success.get_value().as_u64(), Some(0));
+
+        let invalid_handle = vars
+            .iter()
+            .find(|c| c.get_name() == "STATUS_INVALID_HANDLE")
+            .expect("STATUS_INVALID_HANDLE must exist in kernel mode");
+        assert_eq!(invalid_handle.get_value().as_u64(), Some(0xC000_0008));
+
+        let status_count = vars
+            .iter()
+            .filter(|c| c.get_name().starts_with("STATUS_"))
+            .count();
+        assert!(
+            status_count > 1000,
+            "expected thousands of STATUS_* codes in kernel mode, got {status_count}"
+        );
+
+        Ok(())
+    }
+
+    /// PHNT user-mode: regression test for the half of #24 / the
+    /// `cast_len` type-alias-macro fix surfaced during PR review.
+    ///
+    /// Before the fix only the four `STATUS_SEVERITY_*`
+    /// integer-literal macros came through — every
+    /// `((NTSTATUS)0x…L)`-shaped code was silently dropped.
+    ///
+    /// Root cause: `um/powerbase.h` emits a transient
+    /// `#define NTSTATUS LONG` gated on `NT_SUCCESS` not yet being
+    /// defined, which is the case when `winternl.h` has been stripped
+    /// for phnt. That made `cast_len` refuse to strip the
+    /// `(NTSTATUS)` cast in `STATUS_*` bodies, so cexpr never
+    /// evaluated them.
+    ///
+    /// The fix taught `cast_len` to recognize type-alias macros
+    /// (a macro whose body is itself made of type-shaped tokens).
+    #[test]
+    #[serial]
+    fn status_codes_present_phnt_user_mode() -> anyhow::Result<()> {
+        phnt!(clang, index, tu);
+
+        let vars = collect_constants(&tu, &no_filter());
+
+        let success = vars
+            .iter()
+            .find(|c| c.get_name() == "STATUS_SUCCESS")
+            .expect("STATUS_SUCCESS must exist in phnt user mode");
+        assert_eq!(success.get_value().as_u64(), Some(0));
+
+        // STATUS_INVALID_HANDLE uses the NTSTATUS cast — this is the
+        // exact shape that pre-fix used to vanish.
+        let invalid_handle = vars
+            .iter()
+            .find(|c| c.get_name() == "STATUS_INVALID_HANDLE")
+            .expect(
+                "STATUS_INVALID_HANDLE must resolve in phnt user mode \
+                 (regression: cast_len had to recognize `#define NTSTATUS \
+                 LONG` from powerbase.h as a type-alias macro to strip \
+                 the `(NTSTATUS)` cast)",
+            );
+        assert_eq!(invalid_handle.get_value().as_u64(), Some(0xC000_0008));
+
+        let status_count = vars
+            .iter()
+            .filter(|c| c.get_name().starts_with("STATUS_"))
+            .count();
+        assert!(
+            status_count > 1000,
+            "expected thousands of STATUS_* codes in phnt user mode, got \
+             {status_count} (regression — was 4 before the cast_len fix)"
+        );
 
         Ok(())
     }

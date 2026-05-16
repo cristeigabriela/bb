@@ -13,7 +13,7 @@ mod phnt;
 mod winsdk;
 
 // High-level API
-pub use config::HeaderConfig;
+pub use config::{HeaderConfig, HeaderConfigKind};
 
 // Architecture
 pub use arch::{Arch, ArchDefines};
